@@ -274,6 +274,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private let brightnessController = BrightnessController()
     private let caffeineController = CaffeineController()
     private lazy var currentSkin: Skin = skin(withID: defaults.string(forKey: "skinID"))
+    private let wifiController = WifiController()
+    private var wifiSubmenu: NSMenu?
     private var brightnessTargets: [BrightnessTarget] = []
     private let menuDateFormatter: DateFormatter = {
         let f = DateFormatter()
@@ -497,6 +499,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         addScrollSection(to: menu)
         menu.addItem(buildDockMenuItem())
         menu.addItem(buildBrightnessMenuItem())
+        menu.addItem(buildWifiMenuItem())
 
         menu.addItem(.separator())
 
@@ -535,6 +538,72 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         entries.swapAt(i, i + 1)
         saveEntries()
         refreshTitle()
+    }
+
+    // MARK: Wi-Fi signal
+
+    private func buildWifiMenuItem() -> NSMenuItem {
+        let root = NSMenuItem(title: "📶 Wi-Fi 信号", action: nil, keyEquivalent: "")
+        let sub = NSMenu()
+        sub.delegate = self
+        let hint = NSMenuItem(title: "打开以扫描…", action: nil, keyEquivalent: "")
+        hint.isEnabled = false
+        sub.addItem(hint)
+        wifiSubmenu = sub
+        root.submenu = sub
+        return root
+    }
+
+    // Scan only when the Wi-Fi submenu actually opens (a scan powers up the
+    // radio for a few seconds — too expensive to run on every menu open).
+    func menuWillOpen(_ menu: NSMenu) {
+        guard menu === wifiSubmenu, !wifiController.isScanning else { return }
+        wifiController.requestLocationIfNeeded()
+        menu.removeAllItems()
+        let scanning = NSMenuItem(title: "正在扫描附近网络…", action: nil, keyEquivalent: "")
+        scanning.isEnabled = false
+        menu.addItem(scanning)
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            guard let self = self else { return }
+            let (nets, hint) = self.wifiController.scan()
+            DispatchQueue.main.async { self.populateWifiMenu(nets: nets, hint: hint) }
+        }
+    }
+
+    private func populateWifiMenu(nets: [WifiNetwork], hint: String?) {
+        guard let menu = wifiSubmenu else { return }
+        menu.removeAllItems()
+        if let hint = hint {
+            let item = NSMenuItem(title: hint, action: nil, keyEquivalent: "")
+            item.isEnabled = false
+            menu.addItem(item)
+            return
+        }
+        for n in nets {
+            let level = wifiLevel(rssi: n.rssi)
+            let item = NSMenuItem(title: "", action: nil, keyEquivalent: "")
+            item.state = n.isCurrent ? .on : .off
+            let ps = NSMutableParagraphStyle()
+            ps.tabStops = [NSTextTab(type: .rightTabStopType, location: 230)]
+            let s = NSMutableAttributedString()
+            s.append(NSAttributedString(string: "\(n.ssid)\t", attributes: [
+                .font: NSFont.systemFont(ofSize: 13), .paragraphStyle: ps]))
+            s.append(NSAttributedString(string: "\(wifiBars(level: level)) ", attributes: [
+                .font: NSFont.systemFont(ofSize: 11),
+                .foregroundColor: currentSkin.accent ?? NSColor.labelColor,
+                .paragraphStyle: ps]))
+            s.append(NSAttributedString(string: "\(n.rssi) dBm", attributes: [
+                .font: NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .regular),
+                .foregroundColor: NSColor.secondaryLabelColor,
+                .paragraphStyle: ps]))
+            item.attributedTitle = s
+            menu.addItem(item)
+        }
+        if nets.isEmpty {
+            let none = NSMenuItem(title: "未发现网络", action: nil, keyEquivalent: "")
+            none.isEnabled = false
+            menu.addItem(none)
+        }
     }
 
     // MARK: Skins

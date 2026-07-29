@@ -62,6 +62,21 @@ macOS 只有一个全局「自然滚动」开关同时管鼠标和触控板。�
   厂商会锁掉亮度控制**(OSD 里手动亮度也是灰的),此时 DDC 写入无效——需在显示器
   OSD 关掉 HDR / 切到 Standard 图像模式,并确保 DDC/CI 为开
 
+## Wi-Fi 信号
+
+菜单「📶 Wi-Fi 信号」子菜单:打开时扫描附近网络,按信号强弱排序显示
+每个网络的信号条(▂▄▆█)和 RSSI(dBm),当前连接的网络打 ✓ 并排最前。
+
+- 只在打开该子菜单时才扫描(扫描要占用无线电几秒钟,不会常驻后台扫)
+- 同名网络(多个 AP)自动去重,取最强信号
+- macOS 要求**定位服务**权限才能显示网络名称;首次打开会请求,拒绝则会提示
+
+## 皮肤
+
+菜单「🎨 皮肤」:默认(跟随系统)/ 浅色 / 深色 三种菜单外观,以及
+🍵 抹茶、🌊 海盐、🍊 蜜柑、🌸 樱花四种强调色(应用于顶栏文字和菜单里的
+时间)。选择存本地,重启保持。
+
 ## 防止休眠
 
 菜单里的「☕️ 防止休眠」开关:开启后阻止系统休眠和屏幕熄灭(跑长任务、
@@ -94,7 +109,9 @@ macOS 只有一个全局「自然滚动」开关同时管鼠标和触控板。�
 | 滚动方向 ▸ | 鼠标 / 触控板 各自「自然 / 反转」;含系统基准显示与授权入口 |
 | Dock 固定 ▸ | 选择把 Dock 固定在哪块显示器;✓ 标出当前;「关闭」取消 |
 | 显示器亮度 ▸ | 每块显示器一个亮度滑块(内建走 DisplayServices,外接走 DDC/CI) |
+| 📶 Wi-Fi 信号 ▸ | 扫描附近网络,显示信号条与 dBm;当前网络打 ✓(需定位权限显示名称) |
 | ☕️ 防止休眠 | 开关:阻止系统休眠与屏幕熄灭;开启时顶栏显示 ☕️;不跨重启记忆 |
+| 🎨 皮肤 ▸ | 菜单浅色/深色外观 + 抹茶/海盐/蜜柑/樱花强调色;选择跨重启记忆 |
 | 登录时自动启动 | 开关 `~/Library/LaunchAgents/com.sijie.gtime.plist` |
 
 ## 卸载
@@ -114,6 +131,9 @@ defaults delete com.sijie.gtime
 - `Sources/DockPin.swift` — 显示器枚举、Dock 固定的鼠标事件 tap 控制器
 - `Sources/BrightnessCore.swift` — 纯逻辑:DDC 报文构造、百分比钳制(有测试)
 - `Sources/Brightness.swift` — DisplayServices / IOAVService 亮度读写控制器
+- `Sources/WifiCore.swift` — 纯逻辑:信号等级/百分比换算、去重排序(有测试)
+- `Sources/Wifi.swift` — CoreWLAN 扫描控制器(含定位权限请求)
+- `Sources/Theme.swift` — 皮肤定义(菜单外观 + 强调色)
 - `Sources/Caffeine.swift` — IOPMAssertion 防休眠控制器
 - `Sources/main.swift` — AppKit 壳:状态栏、菜单、搜索窗口、LaunchAgent
 - `Tests/main.swift` — 独立测试二进制:

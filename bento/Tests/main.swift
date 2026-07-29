@@ -242,5 +242,29 @@ expectEq(clampBrightnessPercent(150), 100, "clamp above 100")
 expectEq(clampBrightnessPercent(-5), 0, "clamp below 0")
 expectEq(clampBrightnessPercent(50), 50, "in-range percent unchanged")
 
+// ── Wi-Fi signal logic ───────────────────────────────────────────────────────
+expectEq(wifiLevel(rssi: -40), 4, "strong rssi → level 4")
+expectEq(wifiLevel(rssi: -60), 3, "good rssi → level 3")
+expectEq(wifiLevel(rssi: -70), 2, "fair rssi → level 2")
+expectEq(wifiLevel(rssi: -85), 1, "weak rssi → level 1")
+expectEq(wifiBars(level: 4), "▂▄▆█", "four bars")
+expectEq(wifiBars(level: 2), "▂▄", "two bars")
+expectEq(wifiBars(level: 0), "▂", "level clamps to at least one bar")
+expectEq(wifiPercent(rssi: -30), 100, "percent caps at 100")
+expectEq(wifiPercent(rssi: -90), 0, "percent floors at 0")
+expectEq(wifiPercent(rssi: -60), 50, "midpoint rssi → 50%")
+let wifiNets = [
+    WifiNetwork(ssid: "Home", rssi: -70, isCurrent: false),
+    WifiNetwork(ssid: "Home", rssi: -50, isCurrent: true),
+    WifiNetwork(ssid: "Cafe", rssi: -40, isCurrent: false),
+    WifiNetwork(ssid: "", rssi: -30, isCurrent: false),
+]
+let wifiSorted = dedupedSortedNetworks(wifiNets)
+expectEq(wifiSorted.count, 2, "dedup by ssid, drop empty ssid")
+expectEq(wifiSorted[0].ssid, "Home", "current network sorts first")
+expectEq(wifiSorted[0].rssi, -50, "dedup keeps best rssi")
+expectTrue(wifiSorted[0].isCurrent, "dedup keeps current flag")
+expectEq(wifiSorted[1].ssid, "Cafe", "others sorted by rssi")
+
 print("\n\(passes) passed, \(failures) failed")
 exit(failures == 0 ? 0 : 1)

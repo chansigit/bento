@@ -8,14 +8,14 @@ cd "$(dirname "$0")"
 echo "==> Running tests"
 mkdir -p build
 swiftc Sources/GTimeCore.swift Sources/ScrollCore.swift Sources/DockCore.swift \
-    Sources/BrightnessCore.swift Tests/main.swift -o build/tests
+    Sources/BrightnessCore.swift Sources/WifiCore.swift Tests/main.swift -o build/tests
 ./build/tests
 
 echo "==> Compiling"
 swiftc -O -wmo Sources/GTimeCore.swift Sources/ScrollCore.swift Sources/ScrollFlip.swift \
     Sources/DockCore.swift Sources/DockPin.swift \
     Sources/BrightnessCore.swift Sources/Brightness.swift Sources/Caffeine.swift Sources/Theme.swift \
-    Sources/main.swift -o build/Bento
+    Sources/WifiCore.swift Sources/Wifi.swift Sources/main.swift -o build/Bento
 
 echo "==> Packaging Bento.app"
 APP=build/Bento.app
@@ -49,6 +49,10 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
 	<true/>
 	<key>NSHighResolutionCapable</key>
 	<true/>
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>扫描附近 Wi-Fi 网络时,macOS 要求定位权限才能显示网络名称。</string>
+	<key>NSLocationUsageDescription</key>
+	<string>扫描附近 Wi-Fi 网络时,macOS 要求定位权限才能显示网络名称。</string>
 </dict>
 </plist>
 PLIST
