@@ -1,6 +1,6 @@
-# sjtools
+# bento 🍱
 
-一些自用的 macOS 小工具合集。
+一些自用的 macOS 小工具合集,主打同名的菜单栏多合一工具 Bento。
 
 ## 工具
 
