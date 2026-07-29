@@ -442,6 +442,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     func menuNeedsUpdate(_ menu: NSMenu) {
+        // We are also the delegate of the Wi-Fi submenu (for menuWillOpen);
+        // only the status-bar root menu gets rebuilt here.
+        guard menu === statusItem.menu else { return }
         menu.removeAllItems()
         menu.appearance = currentSkin.appearanceName.flatMap { NSAppearance(named: $0) }
         let now = Date()
