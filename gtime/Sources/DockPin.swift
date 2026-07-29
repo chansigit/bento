@@ -78,41 +78,79 @@ func currentDockDisplayID() -> CGDirectDisplayID? {
 
 final class DockPinController {
     private(set) var targetName: String?
-    fileprivate var targetDisplayID: CGDirectDisplayID = 0
-    fileprivate var edge: DockEdge = .bottom
-    fileprivate var eventTap: CFMachPort?
-    private var runLoopSource: CFRunLoopSource?
+    private var targetDisplayID: CGDirectDisplayID = 0
+    private var edge: DockEdge = .bottom
+    private var monitor: Any?          // NSEvent global mouse monitor (listen-only)
     let zone: CGFloat = 6
+    private var snapshot: [(id: CGDirectDisplayID, bounds: CGRect)] = []
 
     init(targetName: String?) { self.targetName = targetName }
 
-    var isActive: Bool { eventTap != nil }
+    var isActive: Bool { monitor != nil }
 
-    /// Change the pinned display (nil = unpin) and (re)configure the tap.
+    /// Change the pinned display (nil = unpin) and (re)configure.
     @discardableResult
     func setTarget(_ name: String?, promptForPermission: Bool) -> Bool {
         targetName = name
-        return reapply(prompt: promptForPermission)
+        return reapply()
     }
 
-    /// Re-resolve the current target against live displays/orientation and start or stop the tap.
+    /// Re-resolve the current target against live displays/orientation and start or stop.
     @discardableResult
-    func reapply() -> Bool { return reapply(prompt: false) }
-
-    @discardableResult
-    private func reapply(prompt: Bool) -> Bool {
+    func reapply() -> Bool {
         edge = dockEdge(from: dockOrientationString())
+        let displays = listDockDisplays()
+        snapshot = displays.map { ($0.id, $0.bounds) }
         guard let name = targetName,
-              let disp = listDockDisplays().first(where: { $0.name == name }) else {
-            stopTap()
+              let disp = displays.first(where: { $0.name == name }) else {
+            stopMonitor()
             return true
         }
         targetDisplayID = disp.id
-        if !hasAccessibilityPermission(prompt: prompt) {
-            stopTap()
-            return false
+        // With only the target display connected there's nothing to block.
+        guard snapshot.contains(where: { $0.id != disp.id }) else {
+            stopMonitor()
+            return true
         }
-        return startTap()
+        startMonitor()
+        return true
+    }
+
+    private func startMonitor() {
+        if monitor != nil { return }
+        // A listen-only global monitor observes moves WITHOUT sitting in the input path,
+        // so it adds no cursor latency (unlike an active CGEventTap). It also needs no
+        // Accessibility permission for mouse events.
+        monitor = NSEvent.addGlobalMonitorForEvents(
+            matching: [.mouseMoved, .leftMouseDragged, .rightMouseDragged]
+        ) { [weak self] _ in
+            self?.enforce()
+        }
+    }
+
+    private func stopMonitor() {
+        if let m = monitor { NSEvent.removeMonitor(m) }
+        monitor = nil
+    }
+
+    /// If the pointer is inside a non-target display's true-outer Dock trigger zone,
+    /// warp it back out. Pure arithmetic against the cached snapshot — no syscalls.
+    private func enforce() {
+        guard let point = CGEvent(source: nil)?.location else { return }
+        var bounds: CGRect? = nil
+        var isTarget = false
+        for d in snapshot where d.bounds.contains(point) {
+            bounds = d.bounds
+            isTarget = (d.id == targetDisplayID)
+            break
+        }
+        guard let b = bounds, !isTarget else { return }
+        guard let clamped = clampedCursor(point: point, displayBounds: b,
+                                          isTargetDisplay: false, dockEdge: edge, zone: zone) else { return }
+        let probe = edgeProbePoint(point: point, displayBounds: b, dockEdge: edge)
+        if snapshot.contains(where: { $0.bounds.contains(probe) }) { return }  // internal boundary
+        CGWarpMouseCursorPosition(clamped)
+        CGAssociateMouseAndMouseCursorPosition(1)
     }
 
     /// Actively migrate the Dock onto the pinned display. macOS relocates the always-on
@@ -202,80 +240,4 @@ final class DockPinController {
         return pointAt(CGFloat(bestStart + bestLen / 2) / CGFloat(n))
     }
 
-    @discardableResult
-    private func startTap() -> Bool {
-        if let tap = eventTap {
-            CGEvent.tapEnable(tap: tap, enable: true)
-            return true
-        }
-        let mask: CGEventMask = (1 << CGEventType.mouseMoved.rawValue)
-            | (1 << CGEventType.leftMouseDragged.rawValue)
-            | (1 << CGEventType.rightMouseDragged.rawValue)
-        guard let tap = CGEvent.tapCreate(
-            tap: .cghidEventTap,
-            place: .headInsertEventTap,
-            options: .defaultTap,
-            eventsOfInterest: mask,
-            callback: dockPinCallback,
-            userInfo: Unmanaged.passUnretained(self).toOpaque()
-        ) else {
-            return false
-        }
-        eventTap = tap
-        let src = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, tap, 0)
-        runLoopSource = src
-        CFRunLoopAddSource(CFRunLoopGetMain(), src, .commonModes)
-        CGEvent.tapEnable(tap: tap, enable: true)
-        return true
-    }
-
-    private func stopTap() {
-        if let tap = eventTap { CGEvent.tapEnable(tap: tap, enable: false) }
-        if let src = runLoopSource { CFRunLoopRemoveSource(CFRunLoopGetMain(), src, .commonModes) }
-        eventTap = nil
-        runLoopSource = nil
-    }
-}
-
-private func dockPinCallback(
-    proxy: CGEventTapProxy,
-    type: CGEventType,
-    event: CGEvent,
-    userInfo: UnsafeMutableRawPointer?
-) -> Unmanaged<CGEvent>? {
-    guard let userInfo = userInfo else { return Unmanaged.passUnretained(event) }
-    let c = Unmanaged<DockPinController>.fromOpaque(userInfo).takeUnretainedValue()
-
-    if type == .tapDisabledByTimeout || type == .tapDisabledByUserInput {
-        if let tap = c.eventTap { CGEvent.tapEnable(tap: tap, enable: true) }
-        return Unmanaged.passUnretained(event)
-    }
-
-    let point = event.location
-    var displayID: CGDirectDisplayID = 0
-    var count: UInt32 = 0
-    CGGetDisplaysWithRect(CGRect(x: point.x, y: point.y, width: 1, height: 1), 1, &displayID, &count)
-    guard count > 0 else { return Unmanaged.passUnretained(event) }
-
-    let isTarget = (displayID == c.targetDisplayID)
-    let bounds = CGDisplayBounds(displayID)
-    if let clamped = clampedCursor(point: point, displayBounds: bounds,
-                                   isTargetDisplay: isTarget, dockEdge: c.edge, zone: c.zone) {
-        // Only enforce at a TRUE outer edge. If another display sits just beyond this edge,
-        // it's an internal boundary — blocking it would trap the cursor between screens.
-        let probe = edgeProbePoint(point: point, displayBounds: bounds, dockEdge: c.edge)
-        var pd: CGDirectDisplayID = 0
-        var pc: UInt32 = 0
-        CGGetDisplaysWithRect(CGRect(x: probe.x, y: probe.y, width: 1, height: 1), 1, &pd, &pc)
-        if pc == 0 {
-            event.location = clamped
-            // Rewriting the event location alone does NOT hold a real hardware cursor, so
-            // forcibly warp it out of the Dock trigger zone, then re-associate so the
-            // post-warp suppression window doesn't briefly freeze the pointer.
-            CGWarpMouseCursorPosition(clamped)
-            CGAssociateMouseAndMouseCursorPosition(1)
-            return nil   // swallow the event; the warp already positioned the cursor
-        }
-    }
-    return Unmanaged.passUnretained(event)
 }

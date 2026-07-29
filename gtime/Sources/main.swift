@@ -591,11 +591,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             line.isEnabled = false
             sub.addItem(line)
         }
-        if current != nil && !hasAccessibilityPermission(prompt: false) {
-            let perm = NSMenuItem(title: "⚠️ 授予辅助功能权限…", action: #selector(openAccessibilitySettings), keyEquivalent: "")
-            perm.target = self
-            sub.addItem(perm)
-        }
 
         root.submenu = sub
         return root
