@@ -23,6 +23,17 @@ func wifiBars(level: Int) -> String {
     return bars.prefix(n).joined()
 }
 
+/// Human verdict for a signal level — tells the user which network is better
+/// instead of making them decode dBm.
+func wifiQualityLabel(level: Int) -> String {
+    switch level {
+    case 4: return "极好"
+    case 3: return "良好"
+    case 2: return "一般"
+    default: return "弱"
+    }
+}
+
 /// Map RSSI to an intuitive 0–100%: -90 dBm → 0%, -30 dBm → 100%, clamped.
 func wifiPercent(rssi: Int) -> Int {
     let p = (rssi + 90) * 100 / 60

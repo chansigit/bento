@@ -595,11 +595,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             let s = NSMutableAttributedString()
             s.append(NSAttributedString(string: "\(n.ssid)\t", attributes: [
                 .font: NSFont.systemFont(ofSize: 13), .paragraphStyle: ps]))
-            s.append(NSAttributedString(string: "\(wifiBars(level: level)) ", attributes: [
-                .font: NSFont.systemFont(ofSize: 11),
-                .foregroundColor: currentSkin.accent ?? NSColor.labelColor,
+            let qualityColor: NSColor = level >= 3 ? .systemGreen : (level == 2 ? .systemOrange : .systemRed)
+            s.append(NSAttributedString(string: "\(wifiBars(level: level)) \(wifiQualityLabel(level: level)) ", attributes: [
+                .font: NSFont.systemFont(ofSize: 11, weight: .medium),
+                .foregroundColor: qualityColor,
                 .paragraphStyle: ps]))
-            s.append(NSAttributedString(string: "\(n.rssi) dBm", attributes: [
+            s.append(NSAttributedString(string: "· \(n.rssi) dBm", attributes: [
                 .font: NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .regular),
                 .foregroundColor: NSColor.secondaryLabelColor,
                 .paragraphStyle: ps]))
