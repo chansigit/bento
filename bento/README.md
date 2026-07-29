@@ -1,6 +1,10 @@
-# GTime
+# Bento 🍱
 
-macOS 菜单栏小工具合一:世界时钟 + 鼠标/触控板滚动方向 + Dock 固定 + 显示器亮度。
+macOS 菜单栏多合一小工具,一格一格装着:世界时钟 + 鼠标/触控板滚动方向 +
+Dock 固定 + 显示器亮度。
+
+> 前身叫 GTime;现已扩展成多功能菜单栏工具,故更名 Bento。为保留已授予的
+> 辅助功能权限与设置,内部 bundle id 仍是 `com.sijie.gtime`。
 
 ## 世界时钟
 
@@ -69,7 +73,7 @@ macOS 只有一个全局「自然滚动」开关同时管鼠标和触控板。�
 ./build.sh
 ```
 
-脚本会依次:跑测试 → 编译 → 打包 `GTime.app` → ad-hoc 签名 → 安装到
+脚本会依次:跑测试 → 编译 → 打包 `Bento.app` → 签名 → 安装到
 `/Applications`(不可写时装到 `~/Applications`)→ 启动。
 
 ## 使用
@@ -89,8 +93,8 @@ macOS 只有一个全局「自然滚动」开关同时管鼠标和触控板。�
 ## 卸载
 
 ```sh
-pkill -x GTime
-rm -rf /Applications/GTime.app ~/Library/LaunchAgents/com.sijie.gtime.plist
+pkill -x Bento
+rm -rf /Applications/Bento.app ~/Library/LaunchAgents/com.sijie.gtime.plist
 defaults delete com.sijie.gtime
 ```
 

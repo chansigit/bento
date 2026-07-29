@@ -31,19 +31,11 @@ func listDockDisplays() -> [DockDisplay] {
     }
 }
 
-/// The Dock's current edge, read from its preferences.
+/// The Dock's current edge, read from its preferences (in-process; no child process).
 func dockOrientationString() -> String {
-    let task = Process()
-    task.executableURL = URL(fileURLWithPath: "/usr/bin/defaults")
-    task.arguments = ["read", "com.apple.dock", "orientation"]
-    let pipe = Pipe()
-    task.standardOutput = pipe
-    task.standardError = Pipe()
-    try? task.run()
-    task.waitUntilExit()
-    let data = pipe.fileHandleForReading.readDataToEndOfFile()
-    let out = String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-    return out.isEmpty ? "bottom" : out
+    CFPreferencesAppSynchronize("com.apple.dock" as CFString)
+    let v = CFPreferencesCopyAppValue("orientation" as CFString, "com.apple.dock" as CFString) as? String
+    return v ?? "bottom"
 }
 
 /// Which display currently hosts the Dock (needs Screen Recording on newer macOS; nil if unknown).
@@ -83,6 +75,7 @@ final class DockPinController {
     private var monitor: Any?          // NSEvent global mouse monitor (listen-only)
     let zone: CGFloat = 6
     private var snapshot: [(id: CGDirectDisplayID, bounds: CGRect)] = []
+    private var mainHeight: CGFloat = 0   // primary display height, for Cocoa→CG y-flip
 
     init(targetName: String?) { self.targetName = targetName }
 
@@ -101,6 +94,7 @@ final class DockPinController {
         edge = dockEdge(from: dockOrientationString())
         let displays = listDockDisplays()
         snapshot = displays.map { ($0.id, $0.bounds) }
+        mainHeight = CGDisplayBounds(CGMainDisplayID()).height
         guard let name = targetName,
               let disp = displays.first(where: { $0.name == name }) else {
             stopMonitor()
@@ -123,8 +117,8 @@ final class DockPinController {
         // Accessibility permission for mouse events.
         monitor = NSEvent.addGlobalMonitorForEvents(
             matching: [.mouseMoved, .leftMouseDragged, .rightMouseDragged]
-        ) { [weak self] _ in
-            self?.enforce()
+        ) { [weak self] event in
+            self?.enforce(cocoaLocation: event.locationInWindow)
         }
     }
 
@@ -135,8 +129,11 @@ final class DockPinController {
 
     /// If the pointer is inside a non-target display's true-outer Dock trigger zone,
     /// warp it back out. Pure arithmetic against the cached snapshot — no syscalls.
-    private func enforce() {
-        guard let point = CGEvent(source: nil)?.location else { return }
+    private func enforce(cocoaLocation: NSPoint) {
+        // Global-monitor events carry screen coordinates in locationInWindow (Cocoa,
+        // bottom-left origin). Flip to CG top-left coordinates — no CGEvent allocation
+        // or HID query per mouse move.
+        let point = CGPoint(x: cocoaLocation.x, y: mainHeight - cocoaLocation.y)
         var bounds: CGRect? = nil
         var isTarget = false
         for d in snapshot where d.bounds.contains(point) {

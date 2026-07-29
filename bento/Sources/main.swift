@@ -273,6 +273,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private lazy var dockController = DockPinController(targetName: defaults.string(forKey: "dockPinTarget"))
     private let brightnessController = BrightnessController()
     private var brightnessTargets: [BrightnessTarget] = []
+    private let menuDateFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "zh_CN")
+        f.dateFormat = "M月d日 EEE"
+        return f
+    }()
 
     private var launchAgentURL: URL {
         return FileManager.default.homeDirectoryForCurrentUser
@@ -373,6 +379,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let nextMinute = (Date().timeIntervalSinceReferenceDate / 60.0).rounded(.up) * 60.0 + 0.1
         let t = Timer(fireAt: Date(timeIntervalSinceReferenceDate: nextMinute), interval: 0,
                       target: self, selector: #selector(tick), userInfo: nil, repeats: false)
+        t.tolerance = 1.0  // let the kernel coalesce the wakeup; the display is minute-granular
         RunLoop.main.add(t, forMode: .common)
         timer = t
     }
@@ -403,9 +410,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             menu.addItem(empty)
         }
 
-        let dateFmt = DateFormatter()
-        dateFmt.locale = Locale(identifier: "zh_CN")
-        dateFmt.dateFormat = "M月d日 EEE"
+        let dateFmt = menuDateFormatter
 
         for (i, e) in entries.enumerated() {
             guard let tz = TimeZone(identifier: e.tzID) else { continue }
@@ -458,7 +463,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
         menu.addItem(.separator())
 
-        let quit = NSMenuItem(title: "退出 GTime", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
+        let quit = NSMenuItem(title: "退出 Bento", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
         menu.addItem(quit)
     }
 
