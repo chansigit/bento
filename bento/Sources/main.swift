@@ -442,8 +442,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     func menuNeedsUpdate(_ menu: NSMenu) {
-        // We are also the delegate of the Wi-Fi submenu (for menuWillOpen);
-        // only the status-bar root menu gets rebuilt here.
+        if menu === wifiSubmenu {
+            startWifiScan(into: menu)
+            return
+        }
         guard menu === statusItem.menu else { return }
         menu.removeAllItems()
         menu.appearance = currentSkin.appearanceName.flatMap { NSAppearance(named: $0) }
@@ -559,8 +561,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     // Scan only when the Wi-Fi submenu actually opens (a scan powers up the
     // radio for a few seconds — too expensive to run on every menu open).
-    func menuWillOpen(_ menu: NSMenu) {
-        guard menu === wifiSubmenu, !wifiController.isScanning else { return }
+    // Menu mutation must happen in menuNeedsUpdate — doing it in menuWillOpen
+    // stalls AppKit's menu-tracking loop.
+    private func startWifiScan(into menu: NSMenu) {
+        guard !wifiController.isScanning else { return }
         wifiController.requestLocationIfNeeded()
         menu.removeAllItems()
         let scanning = NSMenuItem(title: "正在扫描附近网络…", action: nil, keyEquivalent: "")
