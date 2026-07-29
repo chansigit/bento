@@ -14,7 +14,7 @@ swiftc Sources/GTimeCore.swift Sources/ScrollCore.swift Sources/DockCore.swift \
 echo "==> Compiling"
 swiftc -O -wmo Sources/GTimeCore.swift Sources/ScrollCore.swift Sources/ScrollFlip.swift \
     Sources/DockCore.swift Sources/DockPin.swift \
-    Sources/BrightnessCore.swift Sources/Brightness.swift Sources/Caffeine.swift \
+    Sources/BrightnessCore.swift Sources/Brightness.swift Sources/Caffeine.swift Sources/Theme.swift \
     Sources/main.swift -o build/Bento
 
 echo "==> Packaging Bento.app"

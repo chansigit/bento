@@ -273,6 +273,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private lazy var dockController = DockPinController(targetName: defaults.string(forKey: "dockPinTarget"))
     private let brightnessController = BrightnessController()
     private let caffeineController = CaffeineController()
+    private lazy var currentSkin: Skin = skin(withID: defaults.string(forKey: "skinID"))
     private var brightnessTargets: [BrightnessTarget] = []
     private let menuDateFormatter: DateFormatter = {
         let f = DateFormatter()
@@ -369,7 +370,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         var text = statusText(entries: entries, now: Date(), local: TimeZone.current, use24h: use24h)
         if caffeineController.isActive { text = "☕️ " + text }
         let font = NSFont.monospacedDigitSystemFont(ofSize: NSFont.systemFontSize, weight: .regular)
-        statusItem.button?.attributedTitle = NSAttributedString(string: text, attributes: [.font: font])
+        var attrs: [NSAttributedString.Key: Any] = [.font: font]
+        if let accent = currentSkin.accent { attrs[.foregroundColor] = accent }
+        statusItem.button?.attributedTitle = NSAttributedString(string: text, attributes: attrs)
     }
 
     // MARK: Timer & system events
@@ -402,24 +405,56 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     // MARK: Menu
 
+    /// A small gray section label, giving the menu visual hierarchy.
+    private func sectionHeader(_ title: String) -> NSMenuItem {
+        let item = NSMenuItem()
+        item.isEnabled = false
+        item.attributedTitle = NSAttributedString(string: title, attributes: [
+            .font: NSFont.systemFont(ofSize: 11, weight: .semibold),
+            .foregroundColor: NSColor.secondaryLabelColor,
+            .kern: 0.5])
+        return item
+    }
+
+    /// Two-line city row: "flag name …… big time" / small gray date.
+    private func cityAttributedTitle(_ e: TimeEntry, tz: TimeZone, now: Date) -> NSAttributedString {
+        let dateFmt = menuDateFormatter
+        dateFmt.timeZone = tz
+        let name = e.zh == e.en ? e.en : "\(e.zh) \(e.en)"
+        let ps = NSMutableParagraphStyle()
+        ps.tabStops = [NSTextTab(type: .rightTabStopType, location: 250)]
+        ps.paragraphSpacingBefore = 2
+
+        let s = NSMutableAttributedString()
+        s.append(NSAttributedString(string: "\(e.flag) \(name)\t", attributes: [
+            .font: NSFont.systemFont(ofSize: 13), .paragraphStyle: ps]))
+        s.append(NSAttributedString(string: timeString(now: now, tz: tz, use24h: use24h), attributes: [
+            .font: NSFont.monospacedDigitSystemFont(ofSize: 14, weight: .semibold),
+            .foregroundColor: currentSkin.accent ?? NSColor.labelColor,
+            .paragraphStyle: ps]))
+        s.append(NSAttributedString(string: "\n\(dateFmt.string(from: now))", attributes: [
+            .font: NSFont.systemFont(ofSize: 11),
+            .foregroundColor: NSColor.secondaryLabelColor,
+            .paragraphStyle: ps]))
+        return s
+    }
+
     func menuNeedsUpdate(_ menu: NSMenu) {
         menu.removeAllItems()
+        menu.appearance = currentSkin.appearanceName.flatMap { NSAppearance(named: $0) }
         let now = Date()
 
+        menu.addItem(sectionHeader("🌍 世界时钟"))
         if entries.isEmpty {
             let empty = NSMenuItem(title: "还没有添加城市", action: nil, keyEquivalent: "")
             empty.isEnabled = false
             menu.addItem(empty)
         }
 
-        let dateFmt = menuDateFormatter
-
         for (i, e) in entries.enumerated() {
             guard let tz = TimeZone(identifier: e.tzID) else { continue }
-            dateFmt.timeZone = tz
-            let name = e.zh == e.en ? e.en : "\(e.zh) \(e.en)"
-            let title = "\(e.flag) \(name)   \(timeString(now: now, tz: tz, use24h: use24h)) · \(dateFmt.string(from: now))"
-            let item = NSMenuItem(title: title, action: nil, keyEquivalent: "")
+            let item = NSMenuItem(title: "", action: nil, keyEquivalent: "")
+            item.attributedTitle = cityAttributedTitle(e, tz: tz, now: now)
 
             let sub = NSMenu()
             let remove = NSMenuItem(title: "移除", action: #selector(removeEntry(_:)), keyEquivalent: "")
@@ -469,6 +504,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         caffeine.target = self
         caffeine.state = caffeineController.isActive ? .on : .off
         menu.addItem(caffeine)
+        menu.addItem(buildSkinMenuItem())
 
         let quit = NSMenuItem(title: "退出 Bento", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
         menu.addItem(quit)
@@ -501,6 +537,29 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         refreshTitle()
     }
 
+    // MARK: Skins
+
+    private func buildSkinMenuItem() -> NSMenuItem {
+        let root = NSMenuItem(title: "🎨 皮肤", action: nil, keyEquivalent: "")
+        let sub = NSMenu()
+        for s in allSkins {
+            let item = NSMenuItem(title: s.name, action: #selector(setSkin(_:)), keyEquivalent: "")
+            item.target = self
+            item.representedObject = s.id
+            item.state = (s.id == currentSkin.id) ? .on : .off
+            sub.addItem(item)
+        }
+        root.submenu = sub
+        return root
+    }
+
+    @objc private func setSkin(_ sender: NSMenuItem) {
+        guard let id = sender.representedObject as? String else { return }
+        currentSkin = skin(withID: id)
+        defaults.set(id, forKey: "skinID")
+        refreshTitle()
+    }
+
     @objc private func toggleCaffeine() {
         caffeineController.toggle()
         refreshTitle()
@@ -520,9 +579,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let s = scrollController.settings
         let baseline = systemNaturalScrolling()
 
-        let header = NSMenuItem(title: "滚动方向", action: nil, keyEquivalent: "")
-        header.isEnabled = false
-        menu.addItem(header)
+        menu.addItem(sectionHeader("🖱 滚动方向"))
 
         let mouseItem = NSMenuItem()
         mouseItem.view = scrollRow("🖱 鼠标", current: s.mouse, tag: 0)
@@ -585,7 +642,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let displays = listDockDisplays()
         let current = dockController.targetName
 
-        let root = NSMenuItem(title: "Dock 固定", action: nil, keyEquivalent: "")
+        let root = NSMenuItem(title: "📌 Dock 固定", action: nil, keyEquivalent: "")
         let sub = NSMenu()
 
         let off = NSMenuItem(title: "关闭(不固定)", action: #selector(setDockTarget(_:)), keyEquivalent: "")
@@ -637,7 +694,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         brightnessController.refresh()
         brightnessTargets = brightnessController.targets
 
-        let root = NSMenuItem(title: "显示器亮度", action: nil, keyEquivalent: "")
+        let root = NSMenuItem(title: "🔆 显示器亮度", action: nil, keyEquivalent: "")
         let sub = NSMenu()
         if brightnessTargets.isEmpty {
             let none = NSMenuItem(title: "未检测到显示器", action: nil, keyEquivalent: "")
