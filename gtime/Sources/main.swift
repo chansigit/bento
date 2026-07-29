@@ -604,8 +604,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             defaults.removeObject(forKey: "dockPinTarget")
         }
         dockController.setTarget(name, promptForPermission: true)
-        if name != nil {
-            dockController.moveDockToTarget()   // migrate the Dock onto the chosen screen now
+        if let name = name {
+            let alert = NSAlert()
+            alert.messageText = "已把 Dock 固定到「\(name)」"
+            alert.informativeText = "请把鼠标移到该屏幕的底部边缘,Dock 就会迁移过去;之后会一直固定在这块屏,不再乱跑。"
+            alert.addButton(withTitle: "好")
+            NSApp.activate(ignoringOtherApps: true)
+            alert.runModal()
         }
     }
 
