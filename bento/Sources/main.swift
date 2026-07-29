@@ -272,6 +272,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         settings: decodeScrollSettings(defaults.data(forKey: "scrollSettings") ?? Data()))
     private lazy var dockController = DockPinController(targetName: defaults.string(forKey: "dockPinTarget"))
     private let brightnessController = BrightnessController()
+    private let caffeineController = CaffeineController()
     private var brightnessTargets: [BrightnessTarget] = []
     private let menuDateFormatter: DateFormatter = {
         let f = DateFormatter()
@@ -365,7 +366,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     private func refreshTitle() {
-        let text = statusText(entries: entries, now: Date(), local: TimeZone.current, use24h: use24h)
+        var text = statusText(entries: entries, now: Date(), local: TimeZone.current, use24h: use24h)
+        if caffeineController.isActive { text = "☕️ " + text }
         let font = NSFont.monospacedDigitSystemFont(ofSize: NSFont.systemFontSize, weight: .regular)
         statusItem.button?.attributedTitle = NSAttributedString(string: text, attributes: [.font: font])
     }
@@ -463,6 +465,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
         menu.addItem(.separator())
 
+        let caffeine = NSMenuItem(title: "☕️ 防止休眠", action: #selector(toggleCaffeine), keyEquivalent: "")
+        caffeine.target = self
+        caffeine.state = caffeineController.isActive ? .on : .off
+        menu.addItem(caffeine)
+
         let quit = NSMenuItem(title: "退出 Bento", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
         menu.addItem(quit)
     }
@@ -491,6 +498,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         guard i >= 0, i < entries.count - 1 else { return }
         entries.swapAt(i, i + 1)
         saveEntries()
+        refreshTitle()
+    }
+
+    @objc private func toggleCaffeine() {
+        caffeineController.toggle()
         refreshTitle()
     }
 

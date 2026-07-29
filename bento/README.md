@@ -62,6 +62,12 @@ macOS 只有一个全局「自然滚动」开关同时管鼠标和触控板。�
   厂商会锁掉亮度控制**(OSD 里手动亮度也是灰的),此时 DDC 写入无效——需在显示器
   OSD 关掉 HDR / 切到 Standard 图像模式,并确保 DDC/CI 为开
 
+## 防止休眠
+
+菜单里的「☕️ 防止休眠」开关:开启后阻止系统休眠和屏幕熄灭(跑长任务、
+演示时用),顶栏出现 ☕️ 提示。用 `IOPMAssertion` 实现,无需任何权限。
+**不会**跨重启记忆——防休眠是临时状态,重启后自动恢复正常休眠。
+
 ## 其它
 
 - 默认开机自动启动(菜单内可关)
@@ -88,6 +94,7 @@ macOS 只有一个全局「自然滚动」开关同时管鼠标和触控板。�
 | 滚动方向 ▸ | 鼠标 / 触控板 各自「自然 / 反转」;含系统基准显示与授权入口 |
 | Dock 固定 ▸ | 选择把 Dock 固定在哪块显示器;✓ 标出当前;「关闭」取消 |
 | 显示器亮度 ▸ | 每块显示器一个亮度滑块(内建走 DisplayServices,外接走 DDC/CI) |
+| ☕️ 防止休眠 | 开关:阻止系统休眠与屏幕熄灭;开启时顶栏显示 ☕️;不跨重启记忆 |
 | 登录时自动启动 | 开关 `~/Library/LaunchAgents/com.sijie.gtime.plist` |
 
 ## 卸载
@@ -107,6 +114,7 @@ defaults delete com.sijie.gtime
 - `Sources/DockPin.swift` — 显示器枚举、Dock 固定的鼠标事件 tap 控制器
 - `Sources/BrightnessCore.swift` — 纯逻辑:DDC 报文构造、百分比钳制(有测试)
 - `Sources/Brightness.swift` — DisplayServices / IOAVService 亮度读写控制器
+- `Sources/Caffeine.swift` — IOPMAssertion 防休眠控制器
 - `Sources/main.swift` — AppKit 壳:状态栏、菜单、搜索窗口、LaunchAgent
 - `Tests/main.swift` — 独立测试二进制:
   `swiftc Sources/GTimeCore.swift Sources/ScrollCore.swift Tests/main.swift -o build/tests && ./build/tests`
