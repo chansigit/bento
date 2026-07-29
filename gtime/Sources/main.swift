@@ -452,7 +452,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menu.addItem(login)
 
         menu.addItem(.separator())
-        menu.addItem(buildScrollMenuItem())
+        addScrollSection(to: menu)
         menu.addItem(buildDockMenuItem())
         menu.addItem(buildBrightnessMenuItem())
 
@@ -497,45 +497,50 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     // MARK: Scroll direction
 
-    private func buildScrollMenuItem() -> NSMenuItem {
-        // Refresh flips from the live system baseline so the checkmarks and tap state are current.
+    private func addScrollSection(to menu: NSMenu) {
+        // Refresh flips from the live system baseline so the tap state is current.
         scrollController.apply()
         let s = scrollController.settings
         let baseline = systemNaturalScrolling()
 
-        let root = NSMenuItem(title: "滚动方向", action: nil, keyEquivalent: "")
-        let sub = NSMenu()
+        let header = NSMenuItem(title: "滚动方向", action: nil, keyEquivalent: "")
+        header.isEnabled = false
+        menu.addItem(header)
 
-        func deviceItem(_ emoji: String, _ name: String, current: ScrollDir, selector: Selector) -> NSMenuItem {
-            let item = NSMenuItem(title: "\(emoji) \(name):\(current == .natural ? "自然" : "反转")",
-                                  action: nil, keyEquivalent: "")
-            let m = NSMenu()
-            let nat = NSMenuItem(title: "自然", action: selector, keyEquivalent: "")
-            nat.target = self; nat.tag = 0; nat.state = current == .natural ? .on : .off
-            let rev = NSMenuItem(title: "反转", action: selector, keyEquivalent: "")
-            rev.target = self; rev.tag = 1; rev.state = current == .reverse ? .on : .off
-            m.addItem(nat); m.addItem(rev)
-            item.submenu = m
-            return item
-        }
-
-        sub.addItem(deviceItem("🖱", "鼠标", current: s.mouse, selector: #selector(setMouseDir(_:))))
-        sub.addItem(deviceItem("🖐", "触控板", current: s.trackpad, selector: #selector(setTrackpadDir(_:))))
-        sub.addItem(.separator())
-
-        let info = NSMenuItem(title: "系统自然滚动:\(baseline ? "开" : "关")", action: nil, keyEquivalent: "")
-        info.isEnabled = false
-        sub.addItem(info)
+        let mouseItem = NSMenuItem()
+        mouseItem.view = scrollRow("🖱 鼠标", current: s.mouse, tag: 0)
+        menu.addItem(mouseItem)
+        let tpItem = NSMenuItem()
+        tpItem.view = scrollRow("🖐 触控板", current: s.trackpad, tag: 1)
+        menu.addItem(tpItem)
 
         let flips = computeFlips(settings: s, baselineNatural: baseline)
         if shouldRunTap(flips) && !hasAccessibilityPermission(prompt: false) {
             let perm = NSMenuItem(title: "⚠️ 授予辅助功能权限…", action: #selector(openAccessibilitySettings), keyEquivalent: "")
             perm.target = self
-            sub.addItem(perm)
+            menu.addItem(perm)
         }
+    }
 
-        root.submenu = sub
-        return root
+    /// A device row: name on the left, a two-segment toggle button on the right —
+    /// left segment = 自然, right segment = 反转. tag 0 = mouse, 1 = trackpad.
+    private func scrollRow(_ name: String, current: ScrollDir, tag: Int) -> NSView {
+        let width: CGFloat = 280, height: CGFloat = 30
+        let container = NSView(frame: NSRect(x: 0, y: 0, width: width, height: height))
+
+        let label = NSTextField(labelWithString: name)
+        label.font = NSFont.systemFont(ofSize: NSFont.systemFontSize)
+        label.frame = NSRect(x: 20, y: 6, width: 110, height: 18)
+        container.addSubview(label)
+
+        let seg = NSSegmentedControl(labels: ["自然", "反转"], trackingMode: .selectOne,
+                                     target: self, action: #selector(scrollSegChanged(_:)))
+        seg.segmentDistribution = .fillEqually
+        seg.selectedSegment = (current == .reverse) ? 1 : 0
+        seg.tag = tag
+        seg.frame = NSRect(x: 132, y: 3, width: width - 132 - 16, height: 22)
+        container.addSubview(seg)
+        return container
     }
 
     private func applyScroll(_ s: ScrollSettings) {
@@ -543,15 +548,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         scrollController.apply(s, promptForPermission: true)
     }
 
-    @objc private func setMouseDir(_ sender: NSMenuItem) {
+    @objc private func scrollSegChanged(_ sender: NSSegmentedControl) {
+        let dir: ScrollDir = sender.selectedSegment == 1 ? .reverse : .natural
         var s = scrollController.settings
-        s.mouse = sender.tag == 1 ? .reverse : .natural
-        applyScroll(s)
-    }
-
-    @objc private func setTrackpadDir(_ sender: NSMenuItem) {
-        var s = scrollController.settings
-        s.trackpad = sender.tag == 1 ? .reverse : .natural
+        if sender.tag == 0 { s.mouse = dir } else { s.trackpad = dir }
         applyScroll(s)
     }
 
