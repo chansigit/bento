@@ -88,10 +88,21 @@ macOS 只有一个全局「自然滚动」开关同时管鼠标和触控板。�
 - 默认开机自动启动(菜单内可关)
 - 纯 AppKit 原生实现,零依赖,无 Dock 图标,内存占用极小
 
-## 构建与安装
+## 安装(普通用户)
+
+从 [Releases](https://github.com/chansigit/bento/releases) 下载最新的
+`Bento-x.x.dmg`,打开后把 Bento 拖进 Applications 即可。
+
+> 应用是自签名的(没有 Apple 开发者账号公证),首次打开 macOS 会拦截:
+> 在「应用程序」里**右键 Bento → 打开 → 打开**即可(只需一次);或执行
+> `xattr -cr /Applications/Bento.app`。滚动方向/Dock 固定功能需要在
+> 系统设置里授予「辅助功能」权限。
+
+## 构建与安装(从源码)
 
 ```sh
-./build.sh
+./build.sh        # 构建 + 安装 + 启动
+./make-dist.sh    # 另外打一个可分发的 DMG(build/Bento-x.x.dmg)
 ```
 
 脚本会依次:跑测试 → 编译 → 打包 `Bento.app` → 签名 → 安装到
