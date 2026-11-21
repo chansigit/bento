@@ -1,0 +1,412 @@
+import Cocoa
+import SwiftUI
+
+final class WindowSwitcherPanel: NSPanel {
+    override var canBecomeKey: Bool { true }
+}
+
+final class WindowSwitcherCard: NSButton {
+    override var isFlipped: Bool { false }
+    var preview: NSImage?
+    var appIcon: NSImage?
+    var caption = ""
+    var selected = false
+    override func draw(_ dirtyRect: NSRect) {
+        let path = NSBezierPath(roundedRect: bounds.insetBy(dx: 2, dy: 2), xRadius: 9, yRadius: 9)
+        (selected ? NSColor.systemBlue.withAlphaComponent(0.12) : NSColor.clear).setFill()
+        path.fill()
+        (selected ? NSColor.systemBlue : NSColor.clear).setStroke()
+        path.lineWidth = selected ? 2 : 1
+        path.stroke()
+        appIcon?.draw(in: NSRect(x: 9, y: bounds.height - 25, width: 16, height: 16))
+        let style = NSMutableParagraphStyle(); style.lineBreakMode = .byTruncatingTail
+        (caption as NSString).draw(in: NSRect(x: 31, y: bounds.height - 25, width: bounds.width - 40, height: 18), withAttributes: [.font: NSFont.systemFont(ofSize: 11, weight: .medium), .foregroundColor: NSColor.labelColor, .paragraphStyle: style])
+        let area = NSRect(x: 8, y: 8, width: bounds.width - 16, height: bounds.height - 36)
+        if let picture = preview ?? appIcon {
+            let limit: CGFloat = preview == nil ? min(82, area.height * 0.88) : area.height
+            let scale = min(area.width / max(1, picture.size.width), limit / max(1, picture.size.height))
+            let size = NSSize(width: picture.size.width * scale, height: picture.size.height * scale)
+            let rect = NSRect(x: area.midX - size.width / 2, y: area.midY - size.height / 2, width: size.width, height: size.height)
+            NSGraphicsContext.saveGraphicsState()
+            NSGraphicsContext.current?.imageInterpolation = .high
+            NSBezierPath(roundedRect: rect, xRadius: 4, yRadius: 4).addClip()
+            picture.draw(in: rect)
+            NSGraphicsContext.restoreGraphicsState()
+        }
+    }
+}
+
+struct SwitcherThumbnail {
+    let window: SwitcherWindowEntry
+    let image: NSImage
+    let capturedAt: TimeInterval
+}
+
+final class WindowSwitcherController: NSObject, ObservableObject {
+    @Published var permissionSummary = "尚未检查"
+    @Published var shortcutSummary = "按一次 Cmd+Tab，松开 Cmd，验证实际切换。"
+    @Published var checkingPermissions = false
+    private var checkResult: [String: Any] = [:]
+    private var checkingShortcut = false
+    var settings: NSWindow?
+    var panel: WindowSwitcherPanel?
+    var tap: CFMachPort?
+    var tapSource: CFRunLoopSource?
+    var cached: [SwitcherWindowEntry] = []
+    var entries: [SwitcherWindowEntry] = []
+    var selected = 0
+    var visible = false
+    var demo = false
+    var enabled = false
+    var refreshing = false
+    var columns = 4
+    var pageSize = 8
+    var images: [CGWindowID: SwitcherThumbnail] = [:]
+    var requestedImages = Set<CGWindowID>()
+    var pendingImages = Set<CGWindowID>()
+    var generation = 0
+    var consumed = Set<Int64>()
+    private var refreshTimer: Timer?
+    private var previewMonitor: Any?
+    private let defaults = UserDefaults.standard
+    var wantsEnabled: Bool { defaults.bool(forKey: "windowSwitcher.enabled") }
+    var conflictingApp: String? {
+        NSWorkspace.shared.runningApplications.first { ["local.wintab.app", "com.lwouis.alt-tab-macos"].contains($0.bundleIdentifier ?? "") }?.localizedName
+    }
+    let worker = DispatchQueue(label: "local.wintab.windows", qos: .userInitiated)
+
+    override init() {
+        super.init()
+        migrateWindowSwitcherPreferences(into: defaults, legacy: defaults.persistentDomain(forName: "local.wintab.app") ?? [:])
+        defaults.register(defaults: ["windowSwitcher.enabled": true, "windowSwitcher.showMinimized": true, "windowSwitcher.showHidden": true, "windowSwitcher.showWindowless": true, "windowSwitcher.ignoredApps": "com.apple.ScreenSharing\ncom.microsoft.rdc.macos\ncom.teamviewer.TeamViewer\ncom.parallels.*"])
+    }
+    func start() {
+        previewMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+            guard let self = self, self.visible, self.demo else { return event }
+            if event.keyCode == 53 || event.keyCode == 36 { self.finish(commit: false); return nil }
+            if event.keyCode == 48 {
+                self.selected = switcherWrappedIndex(self.selected, delta: event.modifierFlags.contains(.shift) ? -1 : 1, count: 6)
+                self.render(); return nil
+            }
+            return event
+        }
+        apply()
+    }
+    func apply() {
+        guard wantsEnabled, conflictingApp == nil, hasAccessibilityPermission(prompt: false) else { stop(); return }
+        installTap()
+        guard enabled, refreshTimer == nil else { return }
+        refreshTimer = Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { [weak self] _ in self?.refresh() }
+        refresh()
+    }
+    func stop() {
+        enabled = false
+        finish(commit: false)
+        generation += 1
+        images.removeAll(); pendingImages.removeAll()
+        refreshTimer?.invalidate(); refreshTimer = nil
+        if let tap = tap { CGEvent.tapEnable(tap: tap, enable: false); CFMachPortInvalidate(tap) }
+        if let source = tapSource { CFRunLoopRemoveSource(CFRunLoopGetMain(), source, .commonModes) }
+        tap = nil; tapSource = nil; consumed.removeAll(); cached.removeAll()
+    }
+    func shutdown() {
+        stop()
+        if let monitor = previewMonitor { NSEvent.removeMonitor(monitor) }
+        previewMonitor = nil
+    }
+    func menuItem() -> NSMenuItem {
+        apply()
+        let root = NSMenuItem(title: "▣ 窗口切换", action: nil, keyEquivalent: "")
+        let menu = NSMenu()
+        let toggle = NSMenuItem(title: "启用 Cmd+Tab 窗口切换", action: #selector(toggle), keyEquivalent: "")
+        toggle.target = self; toggle.state = wantsEnabled ? .on : .off; menu.addItem(toggle)
+        let state: String
+        if let conflict = conflictingApp { state = "请先退出 " + conflict }
+        else if !wantsEnabled { state = "已暂停 · 使用系统 Cmd+Tab" }
+        else if !hasAccessibilityPermission(prompt: false) { state = "需要 Bento 的辅助功能权限" }
+        else if !enabled { state = "快捷键接管失败，请重新检查权限" }
+        else { state = CGPreflightScreenCaptureAccess() ? "已启用 · 窗口缩略图" : "已启用 · 屏幕录制未授权，显示图标" }
+        menu.addItem(NSMenuItem(title: state, action: nil, keyEquivalent: ""))
+        menu.addItem(.separator())
+        for (title, action) in [("设置…", #selector(showSettings)), ("预览界面", #selector(preview)), ("检查权限并启用", #selector(enable))] {
+            let item = NSMenuItem(title: title, action: action, keyEquivalent: ""); item.target = self; menu.addItem(item)
+        }
+        root.submenu = menu
+        return root
+    }
+    func refresh() {
+        guard enabled, !refreshing, !visible else { return }
+        refreshing = true
+        worker.async {
+            let windows = readSwitcherWindows()
+            DispatchQueue.main.async {
+                if self.enabled {
+                    self.cached = windows
+                    self.pruneThumbnails()
+                }
+                self.refreshing = false
+            }
+        }
+    }
+    @objc func toggle() {
+        defaults.set(!wantsEnabled, forKey: "windowSwitcher.enabled")
+        apply()
+    }
+    @objc func showSettings() {
+        if settings == nil {
+            let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 706, height: 531), styleMask: [.titled, .closable, .miniaturizable], backing: .buffered, defer: false)
+            window.title = "Bento 设置"; window.isReleasedWhenClosed = false
+            window.contentView = NSHostingView(rootView: WindowSwitcherSettingsView(owner: self)); window.center(); settings = window
+        }
+        NSApp.activate(ignoringOtherApps: true); settings?.makeKeyAndOrderFront(nil)
+        checkPermissions()
+    }
+    @objc func checkPermissions() {
+        guard !checkingPermissions else { return }
+        apply()
+        checkingPermissions = true
+        checkingShortcut = true
+        shortcutSummary = "按一次 Cmd+Tab，松开 Cmd，验证实际切换。"
+        let accessibility = hasAccessibilityPermission(prompt: false)
+        let screenCapture = CGPreflightScreenCaptureAccess()
+        let tapActive = tap.map { CGEvent.tapIsEnabled(tap: $0) } ?? false
+        let conflict = conflictingApp
+        permissionSummary = "正在检查 Bento 的权限与真实窗口缩略图…"
+        worker.async {
+            let windows = accessibility ? readSwitcherWindows() : []
+            let ids = Array(windows.filter { !$0.minimized && !$0.app.isHidden }.compactMap { $0.id }.prefix(3))
+            let captured = screenCapture ? ids.filter { captureSwitcherThumbnail($0) != nil }.count : 0
+            DispatchQueue.main.async {
+                self.checkingPermissions = false
+                self.permissionSummary = "辅助功能：\(accessibility ? "已授权" : "未授权") · 屏幕录制：\(screenCapture ? "已授权" : "未授权")\n快捷键监听：\(tapActive ? "运行中" : "未启用") · 可访问窗口：\(windows.count)\n真实缩略图：\(captured) / \(ids.count) 成功" + (conflict.map { "\n冲突应用：" + $0 } ?? "")
+                self.checkResult = ["checkedAt": ISO8601DateFormatter().string(from: Date()), "appPath": Bundle.main.bundlePath, "accessibility": accessibility, "screenCapture": screenCapture, "eventTap": tapActive, "windows": windows.count, "thumbnailAttempts": ids.count, "thumbnailSuccesses": captured, "conflict": conflict ?? "", "shortcutReceived": false]
+                self.saveCheckResult()
+            }
+        }
+    }
+    private func saveCheckResult() {
+        // Diagnostic metadata only: no window titles or captured images are written.
+        do {
+            let directory = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0].appendingPathComponent("com.sijie.gtime")
+            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+            let data = try JSONSerialization.data(withJSONObject: checkResult, options: [.prettyPrinted, .sortedKeys])
+            try data.write(to: directory.appendingPathComponent("window-switcher-check.json"), options: .atomic)
+        } catch { permissionSummary += "\n检查报告保存失败：" + error.localizedDescription }
+    }
+    func accessibilitySettings() {
+        _ = hasAccessibilityPermission(prompt: true)
+        NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility")!)
+    }
+    func screenSettings() {
+        _ = CGRequestScreenCaptureAccess()
+        NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture")!)
+    }
+    @objc func enable() {
+        if let conflict = conflictingApp { message("快捷键冲突", "请先退出 " + conflict + "，再启用 Bento 的窗口切换。"); return }
+        guard hasAccessibilityPermission(prompt: false) else { message("需要辅助功能权限", "请在系统设置中允许 Bento，然后再次点击检查权限并启用。"); return }
+        defaults.set(true, forKey: "windowSwitcher.enabled")
+        apply()
+        if enabled { message("Bento 窗口切换已启用", CGPreflightScreenCaptureAccess() ? "按住 Cmd，再按 Tab 选择窗口。" : "允许 Bento 的屏幕录制权限后可显示缩略图。目前使用应用图标。") }
+        else { message("无法接管快捷键", "请检查 Bento 的辅助功能权限，然后重新打开 Bento。") }
+    }
+    func message(_ title: String, _ detail: String) {
+        let alert = NSAlert(); alert.messageText = title; alert.informativeText = detail; alert.runModal()
+    }
+    func installTap() {
+        if tap != nil { enabled = true; return }
+        let mask = (1 << CGEventType.keyDown.rawValue) | (1 << CGEventType.keyUp.rawValue) | (1 << CGEventType.flagsChanged.rawValue)
+        tap = CGEvent.tapCreate(tap: .cgSessionEventTap, place: .headInsertEventTap, options: .defaultTap, eventsOfInterest: CGEventMask(mask), callback: { _, type, event, context in
+            guard let context = context else { return Unmanaged.passUnretained(event) }
+            let owner = Unmanaged<WindowSwitcherController>.fromOpaque(context).takeUnretainedValue()
+            if type == .tapDisabledByTimeout || type == .tapDisabledByUserInput {
+                owner.finish(commit: false)
+                if let tap = owner.tap { CGEvent.tapEnable(tap: tap, enable: true) }
+                return Unmanaged.passUnretained(event)
+            }
+            return owner.handle(type, event) ? nil : Unmanaged.passUnretained(event)
+        }, userInfo: Unmanaged.passUnretained(self).toOpaque())
+        guard let tap = tap else { enabled = false; return }
+        tapSource = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, tap, 0)
+        CFRunLoopAddSource(CFRunLoopGetMain(), tapSource, .commonModes)
+        CGEvent.tapEnable(tap: tap, enable: true); enabled = true
+    }
+    func handle(_ type: CGEventType, _ event: CGEvent) -> Bool {
+        let key = event.getIntegerValueField(.keyboardEventKeycode)
+        if type == .keyUp { return consumed.remove(key) != nil }
+        if demo { return false }
+        guard enabled else { return false }
+        if type == .flagsChanged {
+            if visible && !demo && !event.flags.contains(.maskCommand) { finish(commit: true) }
+            return false
+        }
+        guard type == .keyDown else { return false }
+        if key == 48 && event.flags.contains(.maskCommand) && !event.flags.contains(.maskAlternate) && !event.flags.contains(.maskControl) {
+            let bundle = NSWorkspace.shared.frontmostApplication?.bundleIdentifier ?? ""
+            if !visible && switcherExcluded(bundle, rules: UserDefaults.standard.string(forKey: "windowSwitcher.ignoredApps") ?? "") { return false }
+            if !visible {
+                entries = cached.filter { !$0.app.isTerminated }
+                guard !entries.isEmpty else { refresh(); return false }
+                selected = 0; demo = false; visible = true
+                if checkingShortcut {
+                    shortcutSummary = "已收到 Cmd+Tab，等待松键切换。"
+                    checkResult["shortcutReceived"] = true
+                    saveCheckResult()
+                }
+            }
+            selected = switcherWrappedIndex(selected, delta: event.flags.contains(.maskShift) ? -1 : 1, count: entries.count)
+            render(); capture(); consumed.insert(key); return true
+        }
+        if visible {
+            switch key {
+            case 53: finish(commit: false)
+            case 36, 76: finish(commit: true)
+            case 123: selected = switcherWrappedIndex(selected, delta: -1, count: entries.count); render()
+            case 124: selected = switcherWrappedIndex(selected, delta: 1, count: entries.count); render()
+            case 125: selected = switcherWrappedIndex(selected, delta: columns, count: entries.count); render()
+            case 126: selected = switcherWrappedIndex(selected, delta: -columns, count: entries.count); render()
+            default: return false
+            }
+            capture(); consumed.insert(key); return true
+        }
+        return false
+    }
+    @objc func preview() { finish(commit: false); demo = true; visible = true; selected = 1; render() }
+    @objc func choose(_ sender: NSButton) { selected = sender.tag; finish(commit: true) }
+    func finish(commit: Bool) {
+        let target = visible && !demo && entries.indices.contains(selected) && commit ? entries[selected] : nil
+        visible = false; demo = false; panel?.orderOut(nil); panel?.contentView = nil
+        requestedImages.removeAll(); entries.removeAll()
+        if let target = target {
+            if let index = cached.firstIndex(where: { item in
+                guard item.app.processIdentifier == target.app.processIdentifier else { return false }
+                if let a = item.element, let b = target.element { return CFEqual(a, b) }
+                return item.element == nil && target.element == nil
+            }) { cached.insert(cached.remove(at: index), at: 0) }
+            focusSwitcherWindow(target)
+            if checkingShortcut {
+                checkingShortcut = false
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
+                    let appMatches = NSWorkspace.shared.frontmostApplication?.processIdentifier == target.app.processIdentifier
+                    let focused = switcherAttribute(AXUIElementCreateApplication(target.app.processIdentifier), kAXFocusedWindowAttribute)
+                    let windowMatches = target.element.map { element in focused.map { CFEqual(element, $0) } ?? false } ?? true
+                    let verified = appMatches && windowMatches
+                    self.shortcutSummary = verified ? "已验证：收到 Cmd+Tab，并成功聚焦所选窗口。" : "已收到 Cmd+Tab，但未确认目标窗口获得焦点。"
+                    self.checkResult["focusVerified"] = verified
+                    self.saveCheckResult()
+                }
+            }
+        }
+    }
+    func pruneThumbnails() {
+        guard CGPreflightScreenCaptureAccess() else { images.removeAll(); return }
+        retainLiveThumbnails()
+    }
+    func retainLiveThumbnails() {
+        images = images.filter { _, thumbnail in
+            cached.contains { sameSwitcherWindow($0, thumbnail.window) }
+        }
+        // Bound retained images to 64 thumbnails, each at most 640 × 640 pixels.
+        for id in images.sorted(by: { $0.value.capturedAt > $1.value.capturedAt }).dropFirst(64).map({ $0.key }) {
+            images.removeValue(forKey: id)
+        }
+    }
+    func completeCapture(_ entry: SwitcherWindowEntry, image: CGImage?, generation requestGeneration: Int) {
+        guard enabled, generation == requestGeneration, let id = entry.id else { return }
+        pendingImages.remove(id)
+        guard cached.contains(where: { sameSwitcherWindow($0, entry) }), let cg = image else { return }
+        let thumbnail = SwitcherThumbnail(window: entry, image: NSImage(cgImage: cg, size: NSSize(width: cg.width, height: cg.height)), capturedAt: ProcessInfo.processInfo.systemUptime)
+        images[id] = thumbnail
+        retainLiveThumbnails()
+        guard visible, !demo else { return }
+        for case let card as WindowSwitcherCard in panel?.contentView?.subviews ?? [] {
+            guard entries.indices.contains(card.tag), sameSwitcherWindow(entries[card.tag], entry) else { continue }
+            card.preview = thumbnail.image
+            card.needsDisplay = true
+        }
+    }
+    func capture() {
+        guard visible, !demo else { return }
+        guard CGPreflightScreenCaptureAccess() else { images.removeAll(); return }
+        let current = generation
+        let now = ProcessInfo.processInfo.systemUptime
+        let indices = panel?.contentView?.subviews.compactMap { ($0 as? WindowSwitcherCard)?.tag } ?? []
+        for index in indices {
+            guard entries.indices.contains(index) else { continue }
+            let entry = entries[index]
+            guard let id = entry.id, !pendingImages.contains(id), !requestedImages.contains(id) else { continue }
+            if let thumbnail = images[id], sameSwitcherWindow(thumbnail.window, entry), now - thumbnail.capturedAt < 2 { continue }
+            requestedImages.insert(id)
+            pendingImages.insert(id)
+            worker.async {
+                let thumbnail = captureSwitcherThumbnail(id)
+                DispatchQueue.main.async { self.completeCapture(entry, image: thumbnail, generation: current) }
+            }
+        }
+    }
+    func render() {
+        guard visible else { return }
+        let screen = NSScreen.screens.first { $0.frame.contains(NSEvent.mouseLocation) } ?? NSScreen.main!
+        let area = screen.visibleFrame
+        let size = UserDefaults.standard.integer(forKey: "windowSwitcher.cardSize")
+        let count = demo ? 6 : entries.count
+        let aspects: [CGFloat] = demo ? [1.65, 1, 1.7, 1.5, 1.7, 0.9] : entries.map { $0.aspect }
+        let maxWidth = min(1100, area.width * 0.78) - 24
+        let maxHeight = min(680, area.height * 0.78)
+        var height: CGFloat = size == 1 ? 112 : size == 3 ? 180 : 142
+        var layout = switcherFlowLayout(aspects: aspects, height: height, maxWidth: maxWidth)
+        if size == 0 {
+            while layout.height + 42 > maxHeight && height > 92 {
+                height -= 5
+                layout = switcherFlowLayout(aspects: aspects, height: height, maxWidth: maxWidth)
+            }
+        }
+        let rowsPerPage = max(1, Int((maxHeight - 42) / (height + switcherCardGap)))
+        let selectedRow = layout.rows[selected]
+        let firstRow = selectedRow / rowsPerPage * rowsPerPage
+        let shown = (0..<count).filter { layout.rows[$0] >= firstRow && layout.rows[$0] < firstRow + rowsPerPage }
+        let panelWidth = layout.width + 24
+        let shownRows = min(rowsPerPage, (layout.rows.last ?? 0) + 1 - firstRow)
+        let panelHeight = CGFloat(shownRows) * (height + switcherCardGap) + 42
+        columns = max(1, layout.rows.filter { $0 == selectedRow }.count)
+        pageSize = max(1, shown.count)
+        if panel == nil {
+            panel = WindowSwitcherPanel(contentRect: .zero, styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
+            panel?.title = "Bento 窗口切换"; panel?.isOpaque = false; panel?.backgroundColor = .clear; panel?.hasShadow = true
+            panel?.level = .popUpMenu; panel?.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]; panel?.hidesOnDeactivate = false
+        }
+        let theme = UserDefaults.standard.integer(forKey: "windowSwitcher.theme")
+        panel?.appearance = theme == 0 ? skin(withID: defaults.string(forKey: "skinID")).appearanceName.flatMap { NSAppearance(named: $0) } : NSAppearance(named: theme == 1 ? .aqua : .darkAqua)
+        panel?.setFrame(NSRect(x: area.midX - panelWidth / 2, y: area.midY - panelHeight / 2, width: panelWidth, height: panelHeight), display: true)
+        let root = NSVisualEffectView(frame: NSRect(x: 0, y: 0, width: panelWidth, height: panelHeight))
+        root.material = .popover; root.blendingMode = .behindWindow; root.state = .active
+        root.wantsLayer = true; root.layer?.cornerRadius = 16
+        root.layer?.borderWidth = 0.5
+        root.layer?.borderColor = NSColor.separatorColor.withAlphaComponent(0.35).cgColor
+        let canPreview = CGPreflightScreenCaptureAccess()
+        let samples = ["项目 · 访达", "设计文档 · 浏览器", "代码 · 编辑器", "团队消息", "终端", "备忘录"]
+        let symbols = ["folder", "globe", "curlybraces", "bubble.left.and.bubble.right", "terminal", "note.text"]
+        for i in shown {
+            var frame = layout.frames[i]
+            frame.origin.x += 12
+            frame.origin.y = panelHeight - 12 - (frame.origin.y - CGFloat(firstRow) * (height + switcherCardGap)) - height
+            let card = WindowSwitcherCard(frame: frame)
+            card.isBordered = false; card.selected = i == selected; card.tag = i; card.target = self; card.action = #selector(choose(_:))
+            if demo {
+                card.caption = samples[i]; card.appIcon = NSImage(systemSymbolName: symbols[i], accessibilityDescription: samples[i])
+                card.appIcon?.size = NSSize(width: 64, height: 64)
+            } else {
+                let entry = entries[i]
+                card.caption = entry.title + (entry.minimized ? " · 已最小化" : "")
+                card.appIcon = entry.app.icon
+                if canPreview, let id = entry.id, let thumbnail = images[id], sameSwitcherWindow(thumbnail.window, entry) { card.preview = thumbnail.image }
+            }
+            card.setAccessibilityLabel(card.caption); card.setAccessibilityValue(card.selected ? "已选择" : "")
+            root.addSubview(card)
+        }
+        let footer = NSTextField(labelWithString: demo ? "示例卡片 · 点击任意卡片关闭预览" : "⇥ 切换   ⇧⇥ 返回   松开 ⌘ 确认   esc 取消     \(selected + 1) / \(count)")
+        footer.font = .systemFont(ofSize: 10); footer.textColor = .secondaryLabelColor
+        footer.frame = NSRect(x: 14, y: 9, width: panelWidth - 28, height: 14); root.addSubview(footer)
+        panel?.contentView = root
+        if demo { panel?.makeKeyAndOrderFront(nil) } else { panel?.orderFrontRegardless() }
+    }
+}

@@ -275,6 +275,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private let caffeineController = CaffeineController()
     private lazy var currentSkin: Skin = skin(withID: defaults.string(forKey: "skinID"))
     private let wifiController = WifiController()
+    private let windowSwitcher = WindowSwitcherController()
     private var wifiSubmenu: NSMenu?
     private var brightnessTargets: [BrightnessTarget] = []
     private let menuDateFormatter: DateFormatter = {
@@ -339,6 +340,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             self, selector: #selector(scrollBaselineChanged),
             name: NSNotification.Name("SwipeScrollDirectionDidChangeNotification"), object: nil)
 
+        windowSwitcher.start()
+        if CommandLine.arguments.contains("--check-window-switcher") {
+            windowSwitcher.showSettings()
+        }
+
         // Re-apply persisted Dock pin (starts the tap if trusted and a display is pinned).
         dockController.reapply()
 
@@ -347,6 +353,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         NotificationCenter.default.addObserver(
             self, selector: #selector(screensChanged),
             name: NSApplication.didChangeScreenParametersNotification, object: nil)
+    }
+
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        windowSwitcher.showSettings()
+        return true
+    }
+
+    @objc private func openSettings() { windowSwitcher.showSettings() }
+
+    func applicationWillTerminate(_ notification: Notification) {
+        windowSwitcher.shutdown()
     }
 
     @objc private func screensChanged() {
@@ -502,6 +519,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
         menu.addItem(.separator())
         addScrollSection(to: menu)
+        menu.addItem(windowSwitcher.menuItem())
         menu.addItem(buildDockMenuItem())
         menu.addItem(buildBrightnessMenuItem())
         menu.addItem(buildWifiMenuItem())
@@ -513,6 +531,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         caffeine.state = caffeineController.isActive ? .on : .off
         menu.addItem(caffeine)
         menu.addItem(buildSkinMenuItem())
+
+        let settings = NSMenuItem(title: "Bento 设置…", action: #selector(openSettings), keyEquivalent: ",")
+        settings.target = self
+        menu.addItem(settings)
 
         let quit = NSMenuItem(title: "退出 Bento", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
         menu.addItem(quit)
@@ -788,30 +810,42 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     private func brightnessRow(for t: BrightnessTarget, index: Int) -> NSView {
-        let width: CGFloat = 280, height: CGFloat = 52
+        let width: CGFloat = 340, height: CGFloat = 72
         let container = NSView(frame: NSRect(x: 0, y: 0, width: width, height: height))
 
-        let label = NSTextField(labelWithString: t.supported ? "🔆 \(t.name)" : "🔆 \(t.name)(亮度被锁定 / 不支持 DDC)")
+        let label = NSTextField(labelWithString: "🔆 \(t.name)")
         label.font = NSFont.systemFont(ofSize: NSFont.smallSystemFontSize)
         label.textColor = t.supported ? .labelColor : .secondaryLabelColor
-        label.frame = NSRect(x: 20, y: 28, width: width - 40, height: 16)
+        label.frame = NSRect(x: 20, y: 50, width: width - 40, height: 16)
         container.addSubview(label)
 
         let slider = NSSlider(value: Double(brightnessController.currentPercent(t)),
                               minValue: 0, maxValue: 100,
                               target: self, action: #selector(brightnessChanged(_:)))
-        slider.frame = NSRect(x: 20, y: 6, width: width - 40, height: 20)
+        slider.frame = NSRect(x: 20, y: 27, width: width - 40, height: 20)
         slider.isEnabled = t.supported
-        slider.isContinuous = true
+        slider.isContinuous = false
         slider.tag = index
         container.addSubview(slider)
+        let status = NSTextField(labelWithString: t.status.isEmpty ? "\(brightnessController.currentPercent(t))%" : t.status)
+        status.font = .systemFont(ofSize: 11)
+        status.textColor = .secondaryLabelColor
+        status.frame = NSRect(x: 20, y: 7, width: width - 40, height: 16)
+        status.tag = 1001
+        container.addSubview(status)
 
         return container
     }
 
     @objc private func brightnessChanged(_ sender: NSSlider) {
         guard sender.tag >= 0, sender.tag < brightnessTargets.count else { return }
-        brightnessController.setPercent(brightnessTargets[sender.tag], Int(sender.doubleValue.rounded()))
+        let t = brightnessTargets[sender.tag]
+        brightnessController.setPercent(t, Int(sender.doubleValue.rounded()))
+        sender.doubleValue = Double(brightnessController.currentPercent(t))
+        if let status = sender.superview?.viewWithTag(1001) as? NSTextField {
+            status.stringValue = t.status.isEmpty ? "\(Int(sender.doubleValue))%" : t.status
+            status.toolTip = status.stringValue
+        }
     }
 
     // MARK: Launch at login (LaunchAgent; SMAppService needs a newer SDK than this box has)

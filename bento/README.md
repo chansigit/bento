@@ -1,7 +1,7 @@
 # Bento 🍱
 
 macOS 菜单栏多合一小工具,一格一格装着:世界时钟 + 鼠标/触控板滚动方向 +
-Dock 固定 + 显示器亮度。
+Dock 固定 + 显示器亮度 + Cmd+Tab 窗口切换。
 
 > 前身叫 GTime;现已扩展成多功能菜单栏工具,故更名 Bento。为保留已授予的
 > 辅助功能权限与设置,内部 bundle id 仍是 `com.sijie.gtime`。
@@ -16,6 +16,22 @@ Dock 固定 + 显示器亮度。
 - 内置库找不到的中小城市/任意地名(如 `达姆施塔特`、`Darmstadt`、大学、地标),
   可点搜索框里的「🔍 在线搜索」用系统地图数据联网解析出所在时区(无需任何权限)
 - 时间随本地时钟自动换算,自动处理夏令时;睡眠唤醒、修改系统时间/时区后立即校正
+
+## 窗口切换（由 WinTab 合并）
+
+菜单「Bento 设置…」直接打开 WinTab 的外观、控制、通用、例外四页；也可在「▣ 窗口切换」中启用、暂停和预览。与 Bento 同进程、同菜单栏图标，
+不再启动独立 WinTab。默认启用；缺少权限或发现独立 WinTab / AltTab 正在运行时不接管快捷键。
+
+- Cmd+Tab 在具体窗口间切换，Shift+Tab 反向，方向键选择，松开 Cmd 或 Return 确认，Esc 取消。
+- 保留紧凑的按比例缩略图布局、自动大小、最小化和隐藏窗口、无窗口应用以及应用例外。
+- 「跟随 Bento」使用 Bento 的浅色/深色皮肤；也可单独指定切换器主题。
+- 首次使用导入独立 WinTab 的外观和筛选设置，之后保存为 Bento 的 `windowSwitcher.*` 设置；不覆盖时钟、滚动等设置。
+- **辅助功能和屏幕录制都授权给 `/Applications/Bento.app`**。独立 WinTab 的权限不能转移。
+  未授权屏幕录制时使用应用图标。列表里没有 Bento 时可通过系统设置的「＋」添加。
+- 设置的「通用」页显示 Bento 自身的辅助功能权限、屏幕录制权限、事件监听和真实缩略图抽样结果。点「重新检查」后按一次 Cmd+Tab 并松开，可查看是否成功聚焦目标窗口。
+- 本地诊断报告位于 `~/Library/Caches/com.sijie.gtime/window-switcher-check.json`，只含权限状态、数量和切换成功标记，不含窗口标题或图像。
+- 暂停会停止窗口轮询并移除键盘事件拦截，不影响滚动方向等其它功能。
+- 缩略图仅在切换时读取，不写入磁盘、不上传。内存保留最多 64 张缩略图，重新打开立即复用；超过 2 秒的截图在打开时异步更新，每轮切换每个窗口最多请求一次，只重绘对应卡片。已关闭窗口、暂停功能或退出应用时清理缓存。窗口列表约 2 秒刷新；跨桌面、全屏与最小化缩略图仍受应用和 macOS 的公开接口限制。
 
 ## 滚动方向
 
@@ -86,7 +102,7 @@ macOS 只有一个全局「自然滚动」开关同时管鼠标和触控板。�
 ## 其它
 
 - 默认开机自动启动(菜单内可关)
-- 纯 AppKit 原生实现,零依赖,无 Dock 图标,内存占用极小
+- AppKit + SwiftUI 原生实现,零依赖,无 Dock 图标,内存占用极小
 
 ## 安装(普通用户)
 
@@ -101,12 +117,13 @@ macOS 只有一个全局「自然滚动」开关同时管鼠标和触控板。�
 ## 构建与安装(从源码)
 
 ```sh
-./build.sh        # 构建 + 安装 + 启动
+./build.sh        # 测试 + 构建 + 安装 + 启动（退出独立 WinTab）
+BUILD_ONLY=1 ./build.sh  # 只测试、构建和验证签名，不替换已安装应用
 ./make-dist.sh    # 另外打一个可分发的 DMG(build/Bento-x.x.dmg)
 ```
 
 脚本会依次:跑测试 → 编译 → 打包 `Bento.app` → 签名 → 安装到
-`/Applications`(不可写时装到 `~/Applications`)→ 启动。
+`/Applications`(不可写时装到 `~/Applications`)→ 启动。安装前备份旧版为 `build/Bento-previous.zip`；若签名身份与已安装 Bento 不一致，拒绝覆盖。
 
 ## 使用
 
@@ -118,6 +135,8 @@ macOS 只有一个全局「自然滚动」开关同时管鼠标和触控板。�
 | 添加城市… | 打开搜索窗口,回车或双击添加,Esc 关闭;本地无结果时回车走在线搜索;同一时区不重复添加 |
 | 24 小时制 | 切换 12/24 小时显示 |
 | 滚动方向 ▸ | 鼠标 / 触控板 各自「自然 / 反转」;含系统基准显示与授权入口 |
+| Bento 设置… | WinTab 的外观、控制、权限检查和应用例外；双击 Bento 也可打开 |
+| ▣ 窗口切换 ▸ | Cmd+Tab 窗口切换、启停、设置、预览与权限状态 |
 | Dock 固定 ▸ | 选择把 Dock 固定在哪块显示器;✓ 标出当前;「关闭」取消 |
 | 显示器亮度 ▸ | 每块显示器一个亮度滑块(内建走 DisplayServices,外接走 DDC/CI) |
 | 📶 Wi-Fi 信号 ▸ | 扫描附近网络,显示信号条与 dBm;当前网络打 ✓(需定位权限显示名称) |
@@ -146,8 +165,18 @@ defaults delete com.sijie.gtime
 - `Sources/Wifi.swift` — CoreWLAN 扫描控制器(含定位权限请求)
 - `Sources/Theme.swift` — 皮肤定义(菜单外观 + 强调色)
 - `Sources/Caffeine.swift` — IOPMAssertion 防休眠控制器
+- `Sources/WindowSwitcherCore.swift` — 切换循环、紧凑布局、例外匹配和一次性设置迁移（有测试）
+- `Sources/WindowSwitcherWindows.swift` — 窗口枚举、缩略图匹配和聚焦
+- `Sources/WindowSwitcher.swift` — 键盘事件拦截、窗口面板、启停生命周期和 Bento 子菜单
+- `Sources/WindowSwitcherSettings.swift` — 窗口切换设置页
 - `Sources/main.swift` — AppKit 壳:状态栏、菜单、搜索窗口、LaunchAgent
 - `Tests/main.swift` — 独立测试二进制:
-  `swiftc Sources/GTimeCore.swift Sources/ScrollCore.swift Tests/main.swift -o build/tests && ./build/tests`
+  `BUILD_ONLY=1 ./build.sh`（含窗口切换菜单及停用状态集成检查）
 
 兼容旧工具链(Swift 5.4 / macOS 11.3 SDK)编译,运行于 macOS 11+。
+
+### BenQ / 外接显示器亮度
+
+Bento 读取显示器真实亮度和最大值，按实际范围换算百分比；松开滑块后写入并读回确认，不再把发送成功当成调节成功。显示器拒绝时回到实际读数并显示提示。BenQ EW3270U 实测需关闭 HDR / B.I.+、开启 DDC/CI，才能手动调节。连接线/转接器也必须支持 DDC。当前仅自动匹配一台外接显示器，多外屏时不猜测 DDC 对应关系。
+
+图标源文件和生成提示在 `Resources/`。窗口切换功能已集成，无需另装 WinTab；升级时保留 Bento 的签名身份，以延续已授予的权限。

@@ -237,6 +237,26 @@ let ddcBig = ddcSetVCPPayload(vcp: 0x10, value: 300)
 expectEq(ddcBig[3], UInt8(1), "ddc value high byte for 300")
 expectEq(ddcBig[4], UInt8(44), "ddc value low byte for 300")
 
+// Hardware replies must be validated before using their range or reporting success.
+expectEq(ddcGetVCPPayload(vcp: 0x10), [UInt8(0x82), 0x01, 0x10, 0xac], "DDC get brightness")
+let benqReply: [UInt8] = [0x6e,0x88,0x02,0,0x10,0,0,0x12,0,0x0f,0xb9,0]
+expectEq(parseDDCValue(benqReply, vcp: 0x10), DDCValue(current: 15, maximum: 18), "BenQ actual range")
+expectEq(parseDDCValue(benqReply, vcp: 0x10)?.percent, 83, "normalize brightness range")
+expectEq(DDCValue(current: 15, maximum: 18).rawValue(percent: 50), 9, "scale write to actual maximum")
+expectEq(DDCValue(current: 99, maximum: 100).rawValue(percent: 99), 99, "normal SDR range")
+expectEq(DDCValue(current: 0, maximum: 65535).rawValue(percent: 200), 65535, "clamp raw brightness")
+expectTrue(parseDDCValue([], vcp: 0x10) == nil, "reject truncated DDC reply")
+expectTrue(parseDDCValue(benqReply, vcp: 0x12) == nil, "reject reply for wrong control")
+var badReply = benqReply
+badReply[10] ^= 1
+expectTrue(parseDDCValue(badReply, vcp: 0x10) == nil, "reject corrupt checksum")
+for (offset, value) in [(3, UInt8(1)), (7, UInt8(0)), (9, UInt8(19))] {
+    badReply = benqReply
+    badReply[offset] = value
+    badReply[10] = badReply.prefix(10).reduce(UInt8(0x50), ^)
+    expectTrue(parseDDCValue(badReply, vcp: 0x10) == nil, "reject unsupported, zero or invalid range")
+}
+
 // ── brightness percent clamping ──────────────────────────────────────────────
 expectEq(clampBrightnessPercent(150), 100, "clamp above 100")
 expectEq(clampBrightnessPercent(-5), 0, "clamp below 0")
@@ -269,6 +289,57 @@ expectEq(wifiSorted[0].ssid, "Home", "current network sorts first")
 expectEq(wifiSorted[0].rssi, -50, "dedup keeps best rssi")
 expectTrue(wifiSorted[0].isCurrent, "dedup keeps current flag")
 expectEq(wifiSorted[1].ssid, "Cafe", "others sorted by rssi")
+
+
+assert(switcherWrappedIndex(0, delta: 1, count: 3) == 1)
+assert(switcherWrappedIndex(0, delta: -1, count: 3) == 2)
+assert(switcherWrappedIndex(2, delta: 1, count: 3) == 0)
+assert(switcherWrappedIndex(0, delta: -4, count: 3) == 2)
+assert(switcherWrappedIndex(0, delta: 1, count: 0) == 0)
+assert(switcherWrappedIndex(0, delta: 1, count: 1) == 0)
+assert(switcherExcluded("com.parallels.desktop", rules: "com.apple.finder\ncom.parallels.*"))
+assert(!switcherExcluded("com.parallelsFake", rules: "com.parallels.*"))
+assert(switcherExcluded("com.apple.finder", rules: "  com.apple.finder \n"))
+assert(!switcherExcluded("anything", rules: "\n , \n"))
+print("10 checks passed: cycling, empty lists, exact and wildcard exceptions")
+let layout = switcherFlowLayout(aspects: [1.6, 0.7, 1, 2, 1.5, 1], height: 175, maxWidth: 700)
+assert(layout.frames.count == 6)
+assert(layout.rows.last! > 0)
+for frame in layout.frames { assert(frame.minX >= 0 && frame.maxX <= 700) }
+for i in 1..<layout.frames.count where layout.rows[i] == layout.rows[i - 1] {
+    assert(layout.frames[i].minX >= layout.frames[i - 1].maxX + switcherCardGap - 0.01)
+}
+assert(switcherFlowLayout(aspects: [2], height: 200, maxWidth: 100).frames[0].width == 100)
+print("Flow layout checks passed: wrapping, bounds, spacing, narrow screens")
+
+// A 25-window desktop should fit a compact panel, not fill the screen.
+let desktopAspects: [CGFloat] = Array(repeating: [1.6, 1.4, 0.9, 1.7, 1.2], count: 5).flatMap { $0 }
+var compactHeight: CGFloat = 142
+var compact = switcherFlowLayout(aspects: desktopAspects, height: compactHeight, maxWidth: 1076)
+while compact.height + 42 > 680 && compactHeight > 92 {
+    compactHeight -= 5
+    compact = switcherFlowLayout(aspects: desktopAspects, height: compactHeight, maxWidth: 1076)
+}
+assert(compact.width + 24 <= 1100)
+assert(compact.height + 42 <= 680)
+assert(compact.frames.count == 25)
+print("25-window compact layout: \(Int(compact.width + 24)) × \(Int(compact.height + 42)) points")
+
+// Preference migration preserves Bento values and runs only once.
+let migrationSuite = "bento-switcher-tests-" + UUID().uuidString
+let migrationDefaults = UserDefaults(suiteName: migrationSuite)!
+migrationDefaults.set("dark", forKey: "skinID")
+migrationDefaults.set(2, forKey: "windowSwitcher.cardSize")
+migrateWindowSwitcherPreferences(into: migrationDefaults, legacy: ["cardSize": 3, "theme": 1, "showHidden": false, "entries": "must not import"])
+expectEq(migrationDefaults.integer(forKey: "windowSwitcher.cardSize"), 2, "migration preserves Bento preference")
+expectEq(migrationDefaults.integer(forKey: "windowSwitcher.theme"), 1, "migration imports WinTab theme")
+expectEq(migrationDefaults.bool(forKey: "windowSwitcher.showHidden"), false, "migration preserves false values")
+expectEq(migrationDefaults.string(forKey: "skinID"), "dark", "migration preserves Bento skin")
+expectTrue(migrationDefaults.object(forKey: "entries") == nil, "migration ignores unrelated keys")
+migrationDefaults.set(2, forKey: "windowSwitcher.theme")
+migrateWindowSwitcherPreferences(into: migrationDefaults, legacy: ["theme": 1])
+expectEq(migrationDefaults.integer(forKey: "windowSwitcher.theme"), 2, "migration runs only once")
+migrationDefaults.removePersistentDomain(forName: migrationSuite)
 
 print("\n\(passes) passed, \(failures) failed")
 exit(failures == 0 ? 0 : 1)
