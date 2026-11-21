@@ -388,10 +388,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private func refreshTitle() {
         var text = statusText(entries: entries, now: Date(), local: TimeZone.current, use24h: use24h)
         if caffeineController.isActive { text = "☕️ " + text }
-        let font = NSFont.monospacedDigitSystemFont(ofSize: NSFont.systemFontSize, weight: .regular)
-        var attrs: [NSAttributedString.Key: Any] = [.font: font]
+        let font = NSFont.monospacedDigitSystemFont(ofSize: 12, weight: .regular)
+        var attrs: [NSAttributedString.Key: Any] = [.font: font, .foregroundColor: NSColor.labelColor]
         if let accent = currentSkin.accent { attrs[.foregroundColor] = accent }
-        statusItem.button?.attributedTitle = NSAttributedString(string: text, attributes: attrs)
+        let title = NSMutableAttributedString(string: text, attributes: attrs)
+        // Negative spacing only at flag/time boundaries, leaving the digits untouched.
+        for (offset, codeUnit) in text.utf16.enumerated() where codeUnit == 0x2009 {
+            title.addAttribute(.kern, value: -4.5, range: NSRange(location: offset, length: 1))
+            if offset > 0 {
+                let flagRange = (text as NSString).rangeOfComposedCharacterSequence(at: offset - 1)
+                title.addAttribute(.kern, value: -1.5, range: flagRange)
+            }
+        }
+        guard let button = statusItem.button else { return }
+        button.attributedTitle = title
+        button.wantsLayer = true
+        button.layer?.cornerRadius = 5
+        button.effectiveAppearance.performAsCurrentDrawingAppearance {
+            button.layer?.backgroundColor = NSColor.labelColor.withAlphaComponent(0.09).cgColor
+        }
     }
 
     // MARK: Timer & system events
@@ -468,7 +483,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menu.appearance = currentSkin.appearanceName.flatMap { NSAppearance(named: $0) }
         let now = Date()
 
-        menu.addItem(sectionHeader("🌍 世界时钟"))
+        menu.addItem(sectionHeader("世界时钟"))
         if entries.isEmpty {
             let empty = NSMenuItem(title: "还没有添加城市", action: nil, keyEquivalent: "")
             empty.isEnabled = false
@@ -501,8 +516,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             menu.addItem(item)
         }
 
-        menu.addItem(.separator())
-
         let add = NSMenuItem(title: "添加城市…", action: #selector(openSearch), keyEquivalent: "n")
         add.target = self
         menu.addItem(add)
@@ -512,29 +525,35 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         fmt.state = use24h ? .on : .off
         menu.addItem(fmt)
 
-        let login = NSMenuItem(title: "登录时自动启动", action: #selector(toggleLaunchAtLogin), keyEquivalent: "")
+        menu.addItem(.separator())
+        menu.addItem(sectionHeader("窗口与输入"))
+        menu.addItem(windowSwitcher.menuItem())
+        menu.addItem(buildDockMenuItem())
+        addScrollSection(to: menu)
+
+        menu.addItem(.separator())
+        menu.addItem(sectionHeader("显示与连接"))
+        menu.addItem(buildBrightnessMenuItem())
+        menu.addItem(buildWifiMenuItem())
+        let caffeine = NSMenuItem(title: "防止休眠", action: #selector(toggleCaffeine), keyEquivalent: "")
+        caffeine.image = NSImage(systemSymbolName: "cup.and.saucer", accessibilityDescription: nil)
+        caffeine.target = self
+        caffeine.state = caffeineController.isActive ? .on : .off
+        menu.addItem(caffeine)
+
+        menu.addItem(.separator())
+        menu.addItem(sectionHeader("Bento"))
+        menu.addItem(buildSkinMenuItem())
+        let login = NSMenuItem(title: "登录时启动", action: #selector(toggleLaunchAtLogin), keyEquivalent: "")
         login.target = self
         login.state = launchAtLoginEnabled() ? .on : .off
         menu.addItem(login)
 
-        menu.addItem(.separator())
-        addScrollSection(to: menu)
-        menu.addItem(windowSwitcher.menuItem())
-        menu.addItem(buildDockMenuItem())
-        menu.addItem(buildBrightnessMenuItem())
-        menu.addItem(buildWifiMenuItem())
-
-        menu.addItem(.separator())
-
-        let caffeine = NSMenuItem(title: "☕️ 防止休眠", action: #selector(toggleCaffeine), keyEquivalent: "")
-        caffeine.target = self
-        caffeine.state = caffeineController.isActive ? .on : .off
-        menu.addItem(caffeine)
-        menu.addItem(buildSkinMenuItem())
-
         let settings = NSMenuItem(title: "Bento 设置…", action: #selector(openSettings), keyEquivalent: ",")
         settings.target = self
+        settings.image = NSImage(systemSymbolName: "gearshape", accessibilityDescription: nil)
         menu.addItem(settings)
+        menu.addItem(.separator())
 
         let quit = NSMenuItem(title: "退出 Bento", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
         menu.addItem(quit)
@@ -570,7 +589,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     // MARK: Wi-Fi signal
 
     private func buildWifiMenuItem() -> NSMenuItem {
-        let root = NSMenuItem(title: "📶 Wi-Fi 信号", action: nil, keyEquivalent: "")
+        let root = NSMenuItem(title: "Wi-Fi 信号", action: nil, keyEquivalent: "")
+        root.image = NSImage(systemSymbolName: "wifi", accessibilityDescription: nil)
         let sub = NSMenu()
         sub.delegate = self
         let hint = NSMenuItem(title: "打开以扫描…", action: nil, keyEquivalent: "")
@@ -639,7 +659,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     // MARK: Skins
 
     private func buildSkinMenuItem() -> NSMenuItem {
-        let root = NSMenuItem(title: "🎨 皮肤", action: nil, keyEquivalent: "")
+        let root = NSMenuItem(title: "外观", action: nil, keyEquivalent: "")
+        root.image = NSImage(systemSymbolName: "paintpalette", accessibilityDescription: nil)
         let sub = NSMenu()
         for s in allSkins {
             let item = NSMenuItem(title: s.name, action: #selector(setSkin(_:)), keyEquivalent: "")
@@ -678,13 +699,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let s = scrollController.settings
         let baseline = systemNaturalScrolling()
 
-        menu.addItem(sectionHeader("🖱 滚动方向"))
-
         let mouseItem = NSMenuItem()
-        mouseItem.view = scrollRow("🖱 鼠标", current: s.mouse, tag: 0)
+        mouseItem.view = scrollRow("鼠标滚动", current: s.mouse, tag: 0)
         menu.addItem(mouseItem)
         let tpItem = NSMenuItem()
-        tpItem.view = scrollRow("🖐 触控板", current: s.trackpad, tag: 1)
+        tpItem.view = scrollRow("触控板滚动", current: s.trackpad, tag: 1)
         menu.addItem(tpItem)
 
         let flips = computeFlips(settings: s, baselineNatural: baseline)
@@ -741,7 +760,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let displays = listDockDisplays()
         let current = dockController.targetName
 
-        let root = NSMenuItem(title: "📌 Dock 固定", action: nil, keyEquivalent: "")
+        let root = NSMenuItem(title: "Dock 固定", action: nil, keyEquivalent: "")
+        root.image = NSImage(systemSymbolName: "pin", accessibilityDescription: nil)
         let sub = NSMenu()
 
         let off = NSMenuItem(title: "关闭(不固定)", action: #selector(setDockTarget(_:)), keyEquivalent: "")
@@ -793,7 +813,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         brightnessController.refresh()
         brightnessTargets = brightnessController.targets
 
-        let root = NSMenuItem(title: "🔆 显示器亮度", action: nil, keyEquivalent: "")
+        let root = NSMenuItem(title: "显示器亮度", action: nil, keyEquivalent: "")
+        root.image = NSImage(systemSymbolName: "sun.max", accessibilityDescription: nil)
         let sub = NSMenu()
         if brightnessTargets.isEmpty {
             let none = NSMenuItem(title: "未检测到显示器", action: nil, keyEquivalent: "")

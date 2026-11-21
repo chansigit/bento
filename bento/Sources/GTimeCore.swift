@@ -53,15 +53,16 @@ func timeString(now: Date, tz: TimeZone, use24h: Bool) -> String {
     return fmt.string(from: now)
 }
 
-/// Text for the menu bar: "🇬🇧 7:11 AM⁺¹  🇨🇳 2:11 PM⁺¹", or "🌐" when empty.
+/// Compact menu-bar clocks; full time formatting remains in the dropdown.
 func statusText(entries: [TimeEntry], now: Date, local: TimeZone, use24h: Bool) -> String {
     var parts: [String] = []
     for e in entries {
         guard let tz = TimeZone(identifier: e.tzID) else { continue }
         let sup = daySuperscript(dayOffset(now: now, tz: tz, local: local))
-        parts.append("\(e.flag) \(timeString(now: now, tz: tz, use24h: use24h))\(sup)")
+        let time = timeString(now: now, tz: tz, use24h: use24h).replacingOccurrences(of: " ", with: "")
+        parts.append("\(e.flag)\u{2009}\(time)\(sup)")
     }
-    return parts.isEmpty ? "🌐" : parts.joined(separator: "  ")
+    return parts.isEmpty ? "🌐" : parts.joined(separator: " ")
 }
 
 /// Regional-indicator flag emoji for an ISO 3166-1 alpha-2 country code ("DE" → "🇩🇪").

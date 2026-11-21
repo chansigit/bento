@@ -9,13 +9,46 @@ let controller = WindowSwitcherController()
 controller.start()
 assert(!controller.enabled && controller.tap == nil)
 let item = controller.menuItem()
-assert(item.title == "▣ 窗口切换")
+assert(item.title == "窗口切换")
 assert(item.submenu?.items.first?.state == .off)
 assert(item.submenu?.items.contains { $0.title == "设置…" && $0.target === controller } == true)
 let tab = CGEvent(keyboardEventSource: nil, virtualKey: 48, keyDown: true)!
 tab.flags = .maskCommand
 assert(!controller.handle(.keyDown, tab), "Paused switcher must pass through Cmd+Tab")
 assert(!controller.visible)
+// Known gray/color/alpha patches must survive resizing without losing their profile.
+let srgb = CGColorSpace(name: CGColorSpace.sRGB)!
+let swatches = CGContext(data: nil, width: 1280, height: 64, bitsPerComponent: 8, bytesPerRow: 0,
+                        space: srgb, bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
+let colors: [[CGFloat]] = [[0,0,0,1], [0.5,0.5,0.5,1], [1,1,1,1], [1,0,0,1], [0,0,1,1], [1,0,0,0.5], [0,0,0,0], [0,1,0,1]]
+for (index, components) in colors.enumerated() {
+    swatches.setFillColor(CGColor(colorSpace: srgb, components: components)!)
+    swatches.fill(CGRect(x: index * 160, y: 0, width: 160, height: 64))
+}
+let resized = makeSwitcherThumbnail(swatches.makeImage()!)!
+assert(resized.width == 640 && resized.height == 32)
+assert(resized.colorSpace?.name == CGColorSpace.sRGB, "Thumbnail must carry an explicit sRGB profile")
+let pixels = resized.dataProvider!.data! as Data
+for (index, components) in colors.enumerated() {
+    let offset = 16 * resized.bytesPerRow + (index * 80 + 40) * 4
+    for channel in 0..<4 {
+        let value = components[channel] * (channel == 3 ? 1 : components[3])
+        assert(abs(Int(pixels[offset + channel]) - Int((value * 255).rounded())) <= 1, "Thumbnail changed gray/color/alpha patch")
+    }
+}
+// A non-sRGB source must be converted, not merely relabeled as sRGB.
+let linearSpace = CGColorSpace(name: CGColorSpace.linearSRGB)!
+let linear = CGContext(data: nil, width: 2, height: 2, bitsPerComponent: 8, bytesPerRow: 0,
+                       space: linearSpace, bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
+linear.setFillColor(CGColor(colorSpace: linearSpace, components: [0.5, 0.5, 0.5, 1])!)
+linear.fill(CGRect(x: 0, y: 0, width: 2, height: 2))
+let converted = makeSwitcherThumbnail(linear.makeImage()!)!
+assert(converted.width == 2 && converted.height == 2, "Small thumbnails must not be enlarged")
+let convertedData = converted.dataProvider!.data! as Data
+let gray = Int(convertedData[0])
+assert((186...189).contains(gray), "Linear 50% gray must convert to approximately 188 in sRGB")
+print("Thumbnail color checks passed: gray, colors, alpha, color conversion and size")
+
 // Cached thumbnails survive closing, and asynchronous updates must not rebuild the panel.
 let context = CGContext(data: nil, width: 2, height: 2, bitsPerComponent: 8, bytesPerRow: 0, space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
 let pixelImage = context.makeImage()!

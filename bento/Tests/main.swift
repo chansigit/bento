@@ -63,13 +63,13 @@ expectEq(timeString(now: shot, tz: TimeZone(identifier: "Asia/Kathmandu")!, use2
 let ukEntry = TimeEntry(en: "London", zh: "伦敦", flag: "🇬🇧", tzID: "Europe/London")
 let cnEntry = TimeEntry(en: "Beijing", zh: "北京", flag: "🇨🇳", tzID: "Asia/Shanghai")
 expectEq(statusText(entries: [ukEntry, cnEntry], now: shot, local: la, use24h: false),
-         "🇬🇧 7:11 AM\u{207A}\u{00B9}  🇨🇳 2:11 PM\u{207A}\u{00B9}",
-         "status text matches screenshot")
+         "🇬🇧\u{2009}7:11AM\u{207A}\u{00B9} 🇨🇳\u{2009}2:11PM\u{207A}\u{00B9}",
+         "compact clocks preserve AM/PM and day offsets")
 expectEq(statusText(entries: [], now: shot, local: la, use24h: false), "🌐", "empty list shows globe")
 // invalid timezone entries are skipped, not crashing
 let bad = TimeEntry(en: "Nowhere", zh: "无", flag: "🏳️", tzID: "Not/AZone")
 expectEq(statusText(entries: [bad, cnEntry], now: shot, local: la, use24h: true),
-         "🇨🇳 14:11\u{207A}\u{00B9}", "invalid tz skipped")
+         "🇨🇳\u{2009}14:11\u{207A}\u{00B9}", "invalid tz skipped")
 
 // ── searchCities ─────────────────────────────────────────────────────────────
 expectEq(searchCities("北京").first?.tzID, "Asia/Shanghai", "chinese name Beijing")

@@ -82,15 +82,22 @@ func focusSwitcherWindow(_ entry: SwitcherWindowEntry) {
 
 func captureSwitcherThumbnail(_ id: CGWindowID) -> CGImage? {
     let cg = CGWindowListCreateImage(.null, .optionIncludingWindow, id, [.boundsIgnoreFraming, .bestResolution])
-    return cg.flatMap { source in
-        let scale = min(1, 640.0 / Double(max(source.width, source.height)))
-        let width = max(1, Int(Double(source.width) * scale))
-        let height = max(1, Int(Double(source.height) * scale))
-        guard let context = CGContext(data: nil, width: width, height: height, bitsPerComponent: 8, bytesPerRow: 0, space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return nil }
-        context.interpolationQuality = .high
-        context.draw(source, in: CGRect(x: 0, y: 0, width: width, height: height))
-        return context.makeImage()
-    }
+    return cg.flatMap(makeSwitcherThumbnail)
+}
+
+func makeSwitcherThumbnail(_ source: CGImage) -> CGImage? {
+    let scale = min(1, 640.0 / Double(max(source.width, source.height)))
+    let width = max(1, Int(Double(source.width) * scale))
+    let height = max(1, Int(Double(source.height) * scale))
+    // Keep a defined profile through capture, resizing and AppKit display on either screen.
+    guard let colorSpace = CGColorSpace(name: CGColorSpace.sRGB),
+          let context = CGContext(data: nil, width: width, height: height, bitsPerComponent: 8,
+                                  bytesPerRow: 0, space: colorSpace,
+                                  bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return nil }
+    context.interpolationQuality = .high
+    context.setBlendMode(.copy)
+    context.draw(source, in: CGRect(x: 0, y: 0, width: width, height: height))
+    return context.makeImage()
 }
 
 func sameSwitcherWindow(_ lhs: SwitcherWindowEntry, _ rhs: SwitcherWindowEntry) -> Bool {

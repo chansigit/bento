@@ -3,8 +3,12 @@
 set -e
 cd "$(dirname "$0")"
 
-VERSION=${1:-1.0}
-./build.sh >/dev/null
+BUILD_ONLY=1 ./build.sh
+VERSION=$(/usr/libexec/PlistBuddy -c 'Print CFBundleShortVersionString' build/Bento.app/Contents/Info.plist)
+if [[ -n "${1:-}" && "$1" != "$VERSION" ]]; then
+  echo "Requested version $1 does not match the app version $VERSION."
+  exit 1
+fi
 
 echo "==> Making Bento-$VERSION.dmg"
 STAGE=build/dmg

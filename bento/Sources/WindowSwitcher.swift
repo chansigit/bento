@@ -116,7 +116,8 @@ final class WindowSwitcherController: NSObject, ObservableObject {
     }
     func menuItem() -> NSMenuItem {
         apply()
-        let root = NSMenuItem(title: "▣ 窗口切换", action: nil, keyEquivalent: "")
+        let root = NSMenuItem(title: "窗口切换", action: nil, keyEquivalent: "")
+        root.image = NSImage(systemSymbolName: "rectangle.on.rectangle", accessibilityDescription: nil)
         let menu = NSMenu()
         let toggle = NSMenuItem(title: "启用 Cmd+Tab 窗口切换", action: #selector(toggle), keyEquivalent: "")
         toggle.target = self; toggle.state = wantsEnabled ? .on : .off; menu.addItem(toggle)
@@ -175,11 +176,13 @@ final class WindowSwitcherController: NSObject, ObservableObject {
         worker.async {
             let windows = accessibility ? readSwitcherWindows() : []
             let ids = Array(windows.filter { !$0.minimized && !$0.app.isHidden }.compactMap { $0.id }.prefix(3))
-            let captured = screenCapture ? ids.filter { captureSwitcherThumbnail($0) != nil }.count : 0
+            let thumbnails = screenCapture ? ids.compactMap { captureSwitcherThumbnail($0) } : []
+            let captured = thumbnails.count
+            let colorSpaces = Array(Set(thumbnails.map { $0.colorSpace?.name as String? ?? "unknown" })).sorted()
             DispatchQueue.main.async {
                 self.checkingPermissions = false
                 self.permissionSummary = "辅助功能：\(accessibility ? "已授权" : "未授权") · 屏幕录制：\(screenCapture ? "已授权" : "未授权")\n快捷键监听：\(tapActive ? "运行中" : "未启用") · 可访问窗口：\(windows.count)\n真实缩略图：\(captured) / \(ids.count) 成功" + (conflict.map { "\n冲突应用：" + $0 } ?? "")
-                self.checkResult = ["checkedAt": ISO8601DateFormatter().string(from: Date()), "appPath": Bundle.main.bundlePath, "accessibility": accessibility, "screenCapture": screenCapture, "eventTap": tapActive, "windows": windows.count, "thumbnailAttempts": ids.count, "thumbnailSuccesses": captured, "conflict": conflict ?? "", "shortcutReceived": false]
+                self.checkResult = ["checkedAt": ISO8601DateFormatter().string(from: Date()), "appPath": Bundle.main.bundlePath, "accessibility": accessibility, "screenCapture": screenCapture, "eventTap": tapActive, "windows": windows.count, "thumbnailAttempts": ids.count, "thumbnailSuccesses": captured, "thumbnailColorSpaces": colorSpaces, "conflict": conflict ?? "", "shortcutReceived": false]
                 self.saveCheckResult()
             }
         }
@@ -377,11 +380,14 @@ final class WindowSwitcherController: NSObject, ObservableObject {
         let theme = UserDefaults.standard.integer(forKey: "windowSwitcher.theme")
         panel?.appearance = theme == 0 ? skin(withID: defaults.string(forKey: "skinID")).appearanceName.flatMap { NSAppearance(named: $0) } : NSAppearance(named: theme == 1 ? .aqua : .darkAqua)
         panel?.setFrame(NSRect(x: area.midX - panelWidth / 2, y: area.midY - panelHeight / 2, width: panelWidth, height: panelHeight), display: true)
-        let root = NSVisualEffectView(frame: NSRect(x: 0, y: 0, width: panelWidth, height: panelHeight))
-        root.material = .popover; root.blendingMode = .behindWindow; root.state = .active
+        let root = NSView(frame: NSRect(x: 0, y: 0, width: panelWidth, height: panelHeight))
+        let dark = panel?.effectiveAppearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
         root.wantsLayer = true; root.layer?.cornerRadius = 16
+        // A solid surface keeps desktop colors and vibrancy out of window previews.
+        root.layer?.backgroundColor = (dark ? NSColor(calibratedWhite: 0.12, alpha: 1) : .white).cgColor
+        root.layer?.masksToBounds = true
         root.layer?.borderWidth = 0.5
-        root.layer?.borderColor = NSColor.separatorColor.withAlphaComponent(0.35).cgColor
+        root.layer?.borderColor = (dark ? NSColor.white : NSColor.black).withAlphaComponent(0.12).cgColor
         let canPreview = CGPreflightScreenCaptureAccess()
         let samples = ["项目 · 访达", "设计文档 · 浏览器", "代码 · 编辑器", "团队消息", "终端", "备忘录"]
         let symbols = ["folder", "globe", "curlybraces", "bubble.left.and.bubble.right", "terminal", "note.text"]
