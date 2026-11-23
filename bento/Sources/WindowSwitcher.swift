@@ -76,6 +76,7 @@ final class WindowSwitcherController: NSObject, ObservableObject {
     var panel: WindowSwitcherPanel?
     var tap: CFMachPort?
     var tapSource: CFRunLoopSource?
+    let recency = SwitcherRecency()
     var cached: [SwitcherWindowEntry] = []
     var entries: [SwitcherWindowEntry] = []
     var selected = 0
@@ -127,6 +128,11 @@ final class WindowSwitcherController: NSObject, ObservableObject {
         guard wantsEnabled, conflictingApp == nil, hasAccessibilityPermission(prompt: false) else { stop(); return }
         installTap()
         guard enabled, refreshTimer == nil else { return }
+        recency.onChange = { [weak self] in
+            guard let self = self else { return }
+            self.cached = self.recency.ordered(self.cached)
+        }
+        recency.start()
         refreshTimer = Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { [weak self] _ in self?.refresh() }
         refresh()
     }
@@ -135,6 +141,7 @@ final class WindowSwitcherController: NSObject, ObservableObject {
         finish(commit: false)
         generation += 1
         images.removeAll(); pendingImages.removeAll()
+        recency.stop()
         refreshTimer?.invalidate(); refreshTimer = nil
         if let tap = tap { CGEvent.tapEnable(tap: tap, enable: false); CFMachPortInvalidate(tap) }
         if let source = tapSource { CFRunLoopRemoveSource(CFRunLoopGetMain(), source, .commonModes) }
@@ -173,7 +180,8 @@ final class WindowSwitcherController: NSObject, ObservableObject {
             let windows = readSwitcherWindows()
             DispatchQueue.main.async {
                 if self.enabled {
-                    self.cached = windows
+                    self.recency.readFocus()
+                    self.cached = self.recency.ordered(windows)
                     self.pruneThumbnails()
                 }
                 self.refreshing = false
@@ -285,6 +293,8 @@ final class WindowSwitcherController: NSObject, ObservableObject {
             let bundle = NSWorkspace.shared.frontmostApplication?.bundleIdentifier ?? ""
             if !visible && switcherExcluded(bundle, rules: UserDefaults.standard.string(forKey: "windowSwitcher.ignoredApps") ?? "") { return false }
             if !visible {
+                recency.readFocus()
+                cached = recency.ordered(cached)
                 entries = cached.filter { !$0.app.isTerminated }
                 guard !entries.isEmpty else { refresh(); return false }
                 selected = 0; demo = false; visible = true

@@ -113,13 +113,35 @@ inline.canvas.scrollWheel(with: NSEvent(cgEvent: wheel)!)
 check(inline.canvas.frame.width > 40 && snipPNG(inline.canvas.document.rendered()!) == originalPNG, "wheel event zooms display without touching pixels")
 inline.close()
 let controller = SnippingController()
-controller.finishCapture(SnipCapture(snapshot: source, screenFrame: display, region: region))
+let captureDisplay = CGRect(x: NSScreen.main!.visibleFrame.minX + 100, y: NSScreen.main!.visibleFrame.minY + 100, width: display.width, height: display.height)
+controller.finishCapture(SnipCapture(snapshot: source, screenFrame: captureDisplay, region: region))
 check(controller.editor == nil && controller.pins.count == 1, "capture completes directly as sticker without editor overlay")
 let sticker = controller.pins[0]
-check(sticker.window!.frame == region.offsetBy(dx: display.minX, dy: display.minY), "sticker preserves exact capture position and point size")
+check(sticker.window!.frame == region.offsetBy(dx: captureDisplay.minX, dy: captureDisplay.minY), "sticker preserves exact capture position and point size")
 check(sticker.image.width == 80 && sticker.image.height == 80 && sticker.window!.frame.size == region.size, "Retina sticker preserves original pixels and logical size")
 check(sticker.window?.level == .floating && sticker.window?.isOpaque == false, "sticker is a small floating window, not a full-screen dimming surface")
 check(!sticker.editing && sticker.controls?.frame.height == 26, "editing menu starts collapsed")
+check(sticker.window!.firstResponder === sticker.canvas, "fresh capture immediately focuses its sticker canvas")
+// Restore the user's clipboard before assertions, including all original data types.
+func copiedPNG(_ pin: SnipPin, characters: String = "c", flags: NSEvent.ModifierFlags = .command) -> Data? {
+    let board = NSPasteboard.general
+    let saved = (board.pasteboardItems ?? []).map { item -> NSPasteboardItem in
+        let copy = NSPasteboardItem()
+        for type in item.types { if let data = item.data(forType: type) { copy.setData(data, forType: type) } }
+        return copy
+    }
+    defer { board.clearContents(); if !saved.isEmpty { board.writeObjects(saved) } }
+    board.clearContents(); board.setString("Bento shortcut test", forType: .string)
+    let event = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: flags, timestamp: 0,
+        windowNumber: pin.window!.windowNumber, context: nil, characters: characters,
+        charactersIgnoringModifiers: characters, isARepeat: false, keyCode: 8)!
+    let handled = pin.window!.performKeyEquivalent(with: event)
+    return handled ? board.data(forType: .png) : nil
+}
+check(copiedPNG(sticker) == snipPNG(sticker.renderedImage()!), "Cmd+C copies fresh capture without clicking or expanding editor")
+check(copiedPNG(sticker, characters: "C", flags: [.command, .capsLock]) == snipPNG(sticker.renderedImage()!), "Caps Lock does not break copy shortcut")
+check(copiedPNG(sticker, flags: [.command, .option]) == nil, "other modifier combinations do not copy sticker")
+
 let stickerFrame = sticker.window!.frame
 sticker.toggleEditing()
 check(sticker.editing && sticker.controls?.frame.height == 104 && controller.editor == nil, "expand edits on sticker without fullscreen editor")
@@ -153,6 +175,13 @@ let editedStickerPNG = snipPNG(sticker.renderedImage()!)!
 check(sticker.canvas.document.marks.count == 1 && originalStickerPNG != editedStickerPNG, "annotation gestures affect sticker exports")
 sticker.toggleEditing()
 check(!sticker.editing && snipPNG(sticker.renderedImage()!) == editedStickerPNG, "collapse preserves edits")
+check(copiedPNG(sticker) == editedStickerPNG, "Cmd+C includes annotations while editor is collapsed")
+let otherWindow = SnipPanel(contentRect: CGRect(x: 10, y: 10, width: 100, height: 50), styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
+otherWindow.isReleasedWhenClosed = false; otherWindow.makeKeyAndOrderFront(nil)
+let otherCopy = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: .command, timestamp: 0, windowNumber: otherWindow.windowNumber, context: nil, characters: "c", charactersIgnoringModifiers: "c", isARepeat: false, keyCode: 8)!
+check(!otherWindow.performKeyEquivalent(with: otherCopy), "copy shortcut is scoped to sticker windows")
+otherWindow.close()
+
 sticker.toggleEditing(); sticker.undoMark()
 check(snipPNG(sticker.renderedImage()!) == originalStickerPNG, "undo survives collapsing and reopening")
 sticker.redoMark()

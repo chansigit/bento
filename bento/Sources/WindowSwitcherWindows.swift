@@ -111,3 +111,76 @@ func sameSwitcherWindow(_ lhs: SwitcherWindowEntry, _ rhs: SwitcherWindowEntry) 
     if let a = lhs.element, let b = rhs.element { return CFEqual(a, b) }
     return lhs.element == nil && rhs.element == nil
 }
+
+// Track actual focus, not Window Server stacking (raising an app can raise several windows).
+final class SwitcherRecency {
+    private var recent: [(pid: pid_t, window: AXUIElement?)] = []
+    private var observer: AXObserver?
+    private var observedPID: pid_t?
+    private var activationToken: NSObjectProtocol?
+    var onChange: (() -> Void)?
+    private func matches(_ pid: pid_t, _ window: AXUIElement?, _ other: (pid: pid_t, window: AXUIElement?)) -> Bool {
+        guard pid == other.pid else { return false }
+        if let a = window, let b = other.window { return CFEqual(a, b) }
+        return window == nil && other.window == nil
+    }
+    func record(pid: pid_t, window: AXUIElement?) {
+        if let first = recent.first, matches(pid, window, first) { return }
+        recent.removeAll { matches(pid, window, $0) }
+        recent.insert((pid, window), at: 0)
+        recent = Array(recent.prefix(256))
+        onChange?()
+    }
+    func ordered(_ windows: [SwitcherWindowEntry]) -> [SwitcherWindowEntry] {
+        let indexed = windows.enumerated().map { item in
+            (offset: item.offset, entry: item.element,
+             rank: recent.firstIndex { matches(item.element.app.processIdentifier, item.element.element, $0) } ?? Int.max)
+        }
+        // Preserve the supplied order among windows that have not been used this session.
+        return indexed.sorted { $0.rank == $1.rank ? $0.offset < $1.offset : $0.rank < $1.rank }.map { $0.entry }
+    }
+    func start() {
+        guard activationToken == nil else { return }
+        activationToken = NSWorkspace.shared.notificationCenter.addObserver(forName: NSWorkspace.didActivateApplicationNotification, object: nil, queue: .main) { [weak self] _ in self?.observeFrontmost() }
+        observeFrontmost()
+    }
+    func observeFrontmost() {
+        guard let app = NSWorkspace.shared.frontmostApplication, app.processIdentifier != getpid() else { return }
+        let pid = app.processIdentifier
+        if observedPID != pid {
+            removeObserver()
+            let ax = AXUIElementCreateApplication(pid)
+            AXUIElementSetMessagingTimeout(ax, 0.05)
+            var created: AXObserver?
+            if AXObserverCreate(pid, { _, _, _, context in
+                guard let context = context else { return }
+                Unmanaged<SwitcherRecency>.fromOpaque(context).takeUnretainedValue().readFocus()
+            }, &created) == .success, let created = created {
+                let status = AXObserverAddNotification(created, ax, kAXFocusedWindowChangedNotification as CFString, Unmanaged.passUnretained(self).toOpaque())
+                if status == .success {
+                    observer = created; observedPID = pid
+                    CFRunLoopAddSource(CFRunLoopGetMain(), AXObserverGetRunLoopSource(created), .commonModes)
+                }
+            }
+        }
+        readFocus()
+    }
+    func readFocus() {
+        guard let app = NSWorkspace.shared.frontmostApplication, app.processIdentifier != getpid() else { return }
+        let ax = AXUIElementCreateApplication(app.processIdentifier)
+        AXUIElementSetMessagingTimeout(ax, 0.05)
+        let value = switcherAttribute(ax, kAXFocusedWindowAttribute)
+        let window = value.flatMap { CFGetTypeID($0) == AXUIElementGetTypeID() ? ($0 as! AXUIElement) : nil }
+        record(pid: app.processIdentifier, window: window)
+    }
+    private func removeObserver() {
+        if let observer = observer { CFRunLoopRemoveSource(CFRunLoopGetMain(), AXObserverGetRunLoopSource(observer), .commonModes) }
+        observer = nil; observedPID = nil
+    }
+    func stop() {
+        removeObserver()
+        if let token = activationToken { NSWorkspace.shared.notificationCenter.removeObserver(token) }
+        activationToken = nil; recent.removeAll()
+    }
+    deinit { stop() }
+}

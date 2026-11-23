@@ -22,11 +22,21 @@ final class SnipPinView: SnipCanvas {
         if event.modifierFlags.contains(.command) { owner?.changeOpacity(event.scrollingDeltaY > 0 ? 0.05 : -0.05) }
         else { owner?.zoom(event.scrollingDeltaY > 0 ? 1.05 : 1 / 1.05) }
     }
+    private func copyShortcut(_ event: NSEvent) -> Bool {
+        let modifiers = event.modifierFlags.intersection([.command, .control, .option, .shift])
+        guard modifiers == .command, event.charactersIgnoringModifiers?.lowercased() == "c",
+              window?.firstResponder === self, let owner = owner else { return false }
+        owner.copyImage(); return true
+    }
+    override func performKeyEquivalent(with event: NSEvent) -> Bool {
+        if copyShortcut(event) { return true }
+        return super.performKeyEquivalent(with: event)
+    }
     override func keyDown(with event: NSEvent) {
+        if copyShortcut(event) { return }
         if event.keyCode == 53 && owner?.editing == true { owner?.toggleEditing(); return }
         if event.modifierFlags.contains(.command) && event.charactersIgnoringModifiers?.lowercased() == "z" { if event.modifierFlags.contains(.shift) { owner?.redoMark() } else { owner?.undoMark() }; return }
         if event.keyCode == 53 || (event.modifierFlags.contains(.command) && event.charactersIgnoringModifiers == "w") { owner?.close(); return }
-        if event.modifierFlags.contains(.command) && event.charactersIgnoringModifiers == "c" { owner?.copyImage(); return }
         if event.modifierFlags.contains(.command) && event.charactersIgnoringModifiers == "s" { owner?.saveImage(); return }
         if event.characters == "+" || event.characters == "=" { owner?.zoom(1.1); return }
         if event.characters == "-" { owner?.zoom(1 / 1.1); return }
@@ -279,6 +289,9 @@ final class SnippingController: NSObject {
         pin.onClose = { [weak self, weak pin] in self?.pins.removeAll { $0 === pin } }
         pins.append(pin); pinsHidden = false
         pins.forEach { $0.show() }
+        // The new capture owns shortcuts immediately; showing old pins must not steal focus.
+        NSApp.activate(ignoringOtherApps: true)
+        pin.window?.makeKeyAndOrderFront(nil); pin.window?.makeFirstResponder(pin.canvas)
     }
     @objc func togglePins() { pinsHidden.toggle(); for pin in pins { if pinsHidden { pin.hide() } else { pin.show() } } }
     @objc private func closePins() { for pin in pins { pin.onClose = nil; pin.close() }; pins.removeAll(); pinsHidden = false }

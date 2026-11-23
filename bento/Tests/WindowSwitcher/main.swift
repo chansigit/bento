@@ -182,3 +182,24 @@ for skin in allSkins {
 themed.shutdown()
 defaults.setVolatileDomain(originalArguments, forName: UserDefaults.argumentDomain)
 print("All 15 switcher previews apply panel and card skins")
+
+let history = SwitcherRecency()
+let focusA = AXUIElementCreateApplication(91001), focusB = AXUIElementCreateApplication(91002), focusC = AXUIElementCreateApplication(91003)
+func recentEntry(_ element: AXUIElement, _ title: String, _ rank: Int) -> SwitcherWindowEntry {
+    SwitcherWindowEntry(app: .current, element: element, title: title, id: nil, rank: rank, minimized: false, aspect: 1.5)
+}
+let recentA = recentEntry(focusA, "A", 0), recentB = recentEntry(focusB, "B", 1), recentC = recentEntry(focusC, "C", 2)
+let stackOrder = [recentA, recentB, recentC]
+assert(history.ordered(stackOrder).map { $0.title } == ["A", "B", "C"], "No history preserves initial window order")
+history.record(pid: getpid(), window: focusB)
+history.record(pid: getpid(), window: focusC)
+assert(history.ordered(stackOrder).map { $0.title } == ["C", "B", "A"], "Actual focus beats window stacking, including same-app windows")
+assert(history.ordered([recentB, recentA, recentC]).map { $0.title } == ["C", "B", "A"], "Background refresh cannot overwrite MRU")
+history.record(pid: getpid(), window: focusB)
+assert(history.ordered(stackOrder).map { $0.title } == ["B", "C", "A"], "Returning to a window makes previous window second")
+history.record(pid: getpid(), window: focusB)
+assert(history.ordered(stackOrder).count == 3, "Repeated focus cannot duplicate entries")
+assert(history.ordered([recentA, recentC]).map { $0.title } == ["C", "A"], "Closed or filtered windows cannot reappear from history")
+history.stop()
+assert(history.ordered(stackOrder).map { $0.title } == ["A", "B", "C"], "Stopping clears focus history")
+print("MRU checks passed: focus order, same-app windows, refresh stability, duplicate focus, removal and cleanup")
