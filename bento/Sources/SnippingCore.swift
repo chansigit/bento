@@ -95,6 +95,34 @@ func saveSnip(_ image: CGImage, window: NSWindow?) {
     else { NSApp.activate(ignoringOtherApps: true); save(panel.runModal()) }
 }
 
+// Encoding must not block input. A newer capture or another clipboard copy wins.
+final class SnipClipboardWriter {
+    private let queue = DispatchQueue(label: "com.sijie.bento.snip-encode", qos: .userInitiated)
+    private let pasteboard: NSPasteboard
+    private var work: DispatchWorkItem?
+    private var generation = 0
+    var isPending: Bool { work != nil }
+    init(pasteboard: NSPasteboard = .general) { self.pasteboard = pasteboard }
+    func cancel() { generation += 1; work?.cancel(); work = nil }
+    func copy(_ image: CGImage, onFailure: @escaping () -> Void) {
+        cancel()
+        let request = generation, changeCount = pasteboard.changeCount
+        let task = DispatchWorkItem { [weak self] in
+            let png = autoreleasepool { snipPNG(image) }
+            DispatchQueue.main.async {
+                guard let self = self, self.generation == request else { return }
+                self.work = nil
+                guard self.pasteboard.changeCount == changeCount else { return }
+                guard let png = png else { onFailure(); return }
+                self.pasteboard.clearContents()
+                if !self.pasteboard.setData(png, forType: .png) { onFailure() }
+            }
+        }
+        work = task; queue.async(execute: task)
+    }
+    deinit { work?.cancel() }
+}
+
 func makeSnipMosaic(_ image: CGImage, blockSize: CGFloat) -> CGImage? {
     guard blockSize.isFinite, blockSize >= 2, let space = CGColorSpace(name: CGColorSpace.sRGB) else { return nil }
     let w = max(1, Int(ceil(CGFloat(image.width) / blockSize))), h = max(1, Int(ceil(CGFloat(image.height) / blockSize)))

@@ -196,6 +196,7 @@ final class SnippingController: NSObject {
     private(set) var editor: SnipEditor?
     private(set) var pins: [SnipPin] = []
     private var selection: SnipSelection?
+    private let clipboardWriter = SnipClipboardWriter()
     private var handler: EventHandlerRef?
     private var hotKeys: [EventHotKeyRef] = []
     private var hotKeyError = false
@@ -231,7 +232,7 @@ final class SnippingController: NSObject {
         if let handler = handler { RemoveEventHandler(handler) }; handler = nil
     }
     func stop() {
-        stopped = true; unregisterKeys()
+        stopped = true; unregisterKeys(); clipboardWriter.cancel()
         selection?.close(); selection = nil
         editor?.close(); editor = nil
         for pin in pins { pin.onClose = nil; pin.close() }; pins.removeAll()
@@ -250,8 +251,8 @@ final class SnippingController: NSObject {
             return
         }
         pendingCapture = true
-        // Let the status menu and hotkey key-up disappear before the selection overlay appears.
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
+        // Allow one display frame for the status menu to disappear before capturing.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.02) { [weak self] in
             guard let self = self else { return }
             self.pendingCapture = false
             guard !self.stopped else { return }
@@ -261,16 +262,20 @@ final class SnippingController: NSObject {
     private func beginCapture() {
         let selection = SnipSelection(); self.selection = selection
         selection.finished = { [weak self] capture in self?.finishCapture(capture) }
-        if !selection.show() { self.selection = nil; snipError(L("无法读取屏幕。请检查 Bento 的屏幕录制权限后重试。")) }
+        selection.show { [weak self, weak selection] success in
+            guard let self = self, let selection = selection, self.selection === selection else { return }
+            if !success { self.selection = nil; snipError(L("无法读取屏幕。请检查 Bento 的屏幕录制权限后重试。")) }
+        }
     }
     func finishCapture(_ capture: SnipCapture?) {
         selection?.close(); selection = nil
         guard let capture = capture else { return }
         let rect = snipPixelRect(capture.region, viewSize: capture.screenFrame.size, imageSize: CGSize(width: capture.snapshot.width, height: capture.snapshot.height))
+        // Detach the small crop from the full-display buffer before retaining it as a sticker.
         guard rect.width * rect.height <= 40_000_000, let cropped = capture.snapshot.cropping(to: rect),
               let image = SnipDocument(image: cropped).rendered() else { snipError(L("无法生成贴图，请缩小截图区域后重试。")); return }
         pin(image, frame: capture.region.offsetBy(dx: capture.screenFrame.minX, dy: capture.screenFrame.minY))
-        if !copySnip(image) { snipError(L("无法复制图像。")) }
+        clipboardWriter.copy(image) { snipError(L("无法复制图像。")) }
     }
     func edit(_ image: CGImage, capture: SnipCapture? = nil) {
         guard Double(image.width) * Double(image.height) <= 40_000_000 else { snipError(L("图像超过 4000 万像素，请缩小截图区域。")); return }

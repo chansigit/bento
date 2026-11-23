@@ -1,4 +1,5 @@
 import Cocoa
+import QuartzCore
 
 func snipPixelRect(_ selection: CGRect, viewSize: CGSize, imageSize: CGSize) -> CGRect {
     guard viewSize.width > 0, viewSize.height > 0 else { return .zero }
@@ -14,30 +15,46 @@ final class SnipSelectionView: NSView {
     var selection = CGRect.zero
     var startPoint: CGPoint?
     var windowMode = false
-    var finished: ((CGImage?) -> Void)?
+    var finished: ((CGRect?) -> Void)?
+    private let snapshotLayer = CALayer()
+    private let shadeLayer = CAShapeLayer()
+    private let borderLayer = CAShapeLayer()
+    private let hintBackground = CALayer()
+    private let hint = NSTextField(labelWithString: "")
+    override var wantsUpdateLayer: Bool { true }
     override var acceptsFirstResponder: Bool { true }
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
     init(image: CGImage, screen: NSScreen, windows: [CGRect]) {
         snapshot = image; screenFrame = screen.frame; self.windows = windows
         super.init(frame: CGRect(origin: .zero, size: screen.frame.size))
+        wantsLayer = true
+        snapshotLayer.contents = image; snapshotLayer.contentsGravity = .resize
+        shadeLayer.fillColor = NSColor.black.withAlphaComponent(0.3).cgColor; shadeLayer.fillRule = .evenOdd
+        borderLayer.fillColor = nil; borderLayer.strokeColor = NSColor.systemBlue.cgColor; borderLayer.lineWidth = 2
+        hintBackground.backgroundColor = NSColor.black.withAlphaComponent(0.75).cgColor; hintBackground.cornerRadius = 9
+        for child in [snapshotLayer, shadeLayer, borderLayer, hintBackground] { layer?.addSublayer(child) }
+        hint.font = .systemFont(ofSize: 13, weight: .medium); hint.textColor = .white; hint.alignment = .center
+        addSubview(hint)
     }
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
     override func resetCursorRects() { addCursorRect(bounds, cursor: .crosshair) }
-    override func draw(_ dirtyRect: NSRect) {
-        let image = NSImage(cgImage: snapshot, size: bounds.size)
-        image.draw(in: bounds)
-        NSColor.black.withAlphaComponent(0.3).setFill(); bounds.fill()
-        if selection.width > 0 && selection.height > 0 {
-            NSGraphicsContext.saveGraphicsState(); NSBezierPath(rect: selection).addClip(); image.draw(in: bounds); NSGraphicsContext.restoreGraphicsState()
-            NSColor.systemBlue.setStroke(); let path = NSBezierPath(rect: selection); path.lineWidth = 2; path.stroke()
-        }
+    override func updateLayer() {
+        // Retain one screen texture; pointer movement changes only the mask and border.
+        CATransaction.begin(); CATransaction.setDisableActions(true)
+        snapshotLayer.frame = bounds
+        shadeLayer.frame = bounds; borderLayer.frame = bounds
+        let shade = CGMutablePath(); shade.addRect(bounds)
+        let selected = selection.intersection(bounds)
+        if !selected.isNull && selected.width > 0 && selected.height > 0 {
+            shade.addRect(selected); borderLayer.path = CGPath(rect: selected, transform: nil)
+        } else { borderLayer.path = nil }
+        shadeLayer.path = shade
         let pixels = snipPixelRect(selection, viewSize: bounds.size, imageSize: CGSize(width: snapshot.width, height: snapshot.height))
-        let text = L("Bento  ·  %@  ·  空格切换选窗口  ·  Esc 取消", String(describing: windowMode ? L("点击选择窗口") : L("拖动框选"))) + (pixels.width > 0 ? "   \(Int(pixels.width)) × \(Int(pixels.height)) px" : "")
-        let attrs: [NSAttributedString.Key: Any] = [.font: NSFont.systemFont(ofSize: 13, weight: .medium), .foregroundColor: NSColor.white]
-        let size = (text as NSString).size(withAttributes: attrs)
-        let box = CGRect(x: max(8, (bounds.width - size.width) / 2 - 14), y: bounds.height - 70, width: size.width + 28, height: 34)
-        NSColor.black.withAlphaComponent(0.75).setFill(); NSBezierPath(roundedRect: box, xRadius: 9, yRadius: 9).fill()
-        (text as NSString).draw(at: CGPoint(x: box.minX + 14, y: box.minY + 9), withAttributes: attrs)
+        hint.stringValue = L("Bento  ·  %@  ·  空格切换选窗口  ·  Esc 取消", windowMode ? L("点击选择窗口") : L("拖动框选")) + (pixels.width > 0 ? "   \(Int(pixels.width)) × \(Int(pixels.height)) px" : "")
+        let width = min(bounds.width - 16, hint.fittingSize.width + 28)
+        hintBackground.frame = CGRect(x: max(8, (bounds.width - width) / 2), y: bounds.height - 70, width: width, height: 34)
+        hint.frame = hintBackground.frame.insetBy(dx: 10, dy: 8)
+        CATransaction.commit()
     }
     private func localPoint(_ event: NSEvent) -> CGPoint {
         let p = convert(event.locationInWindow, from: nil)
@@ -59,7 +76,7 @@ final class SnipSelectionView: NSView {
     override func mouseUp(with event: NSEvent) {
         if let start = startPoint { selection = snipRect(start, localPoint(event)); startPoint = nil }
         let rect = snipPixelRect(selection, viewSize: bounds.size, imageSize: CGSize(width: snapshot.width, height: snapshot.height))
-        if rect.width >= 2 && rect.height >= 2 { finished?(snapshot.cropping(to: rect)) }
+        if rect.width >= 2 && rect.height >= 2 { finished?(selection) }
     }
     override func rightMouseDown(with event: NSEvent) { finished?(nil) }
     override func keyDown(with event: NSEvent) {
@@ -80,36 +97,50 @@ struct SnipCapture {
 final class SnipSelection {
     var panels: [NSPanel] = []
     var finished: ((SnipCapture?) -> Void)?
-    func show() -> Bool {
-        let info = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]] ?? []
-        let windows = info.compactMap { entry -> CGRect? in
-            guard entry[kCGWindowLayer as String] as? Int == 0, entry[kCGWindowOwnerPID as String] as? Int32 != getpid(),
-                  let dictionary = entry[kCGWindowBounds as String] as? NSDictionary else { return nil }
-            return CGRect(dictionaryRepresentation: dictionary)
+    private var generation = 0
+    func show(completion: @escaping (Bool) -> Void) {
+        generation += 1
+        let request = generation
+        let displays = NSScreen.screens.compactMap { screen -> (NSScreen, CGDirectDisplayID)? in
+            guard let number = screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber else { return nil }
+            return (screen, CGDirectDisplayID(number.uint32Value))
         }
-        // Capture every screen before showing any overlay so no selection UI enters the image.
-        let snapshots = NSScreen.screens.compactMap { screen -> (NSScreen, CGImage)? in
-            guard let number = screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber,
-                  let image = CGDisplayCreateImage(CGDirectDisplayID(number.uint32Value)) else { return nil }
-            return (screen, image)
-        }
-        guard !snapshots.isEmpty else { return false }
-        for (screen, image) in snapshots {
-            let panel = SnipPanel(contentRect: screen.frame, styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
-            panel.title = L("Bento 截图选区"); panel.level = .screenSaver; panel.hasShadow = false; panel.isReleasedWhenClosed = false
-            panel.hidesOnDeactivate = false; panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]; panel.acceptsMouseMovedEvents = true
-            let view = SnipSelectionView(image: image, screen: screen, windows: windows)
-            view.finished = { [weak self, weak view] image in
-                guard let self = self, let view = view else { return }
-                let capture = image.map { _ in SnipCapture(snapshot: view.snapshot, screenFrame: screen.frame, region: view.selection) }
-                self.finished?(capture); self.close()
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            // Finish every snapshot before presenting overlays; never capture our own dimming.
+            let lock = NSLock()
+            var images = [CGImage?](repeating: nil, count: displays.count)
+            DispatchQueue.concurrentPerform(iterations: displays.count) { index in
+                let image = CGDisplayCreateImage(displays[index].1)
+                lock.lock(); images[index] = image; lock.unlock()
             }
-            panel.contentView = view; panels.append(panel)
+            let snapshots = displays.enumerated().compactMap { index, display in images[index].map { (display.0, $0) } }
+            let info = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]] ?? []
+            let windows = info.compactMap { entry -> CGRect? in
+                guard entry[kCGWindowLayer as String] as? Int == 0, entry[kCGWindowOwnerPID as String] as? Int32 != getpid(),
+                      let dictionary = entry[kCGWindowBounds as String] as? NSDictionary else { return nil }
+                return CGRect(dictionaryRepresentation: dictionary)
+            }
+            DispatchQueue.main.async {
+                guard let self = self, self.generation == request else { return }
+                guard !snapshots.isEmpty else { completion(false); return }
+                for (screen, image) in snapshots {
+                    let panel = SnipPanel(contentRect: screen.frame, styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
+                    panel.title = L("Bento 截图选区"); panel.level = .screenSaver; panel.hasShadow = false; panel.isReleasedWhenClosed = false
+                    panel.hidesOnDeactivate = false; panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]; panel.acceptsMouseMovedEvents = true
+                    let view = SnipSelectionView(image: image, screen: screen, windows: windows)
+                    view.finished = { [weak self, weak view] region in
+                        guard let self = self, let view = view else { return }
+                        let capture = region.map { SnipCapture(snapshot: view.snapshot, screenFrame: screen.frame, region: $0) }
+                        self.close(); self.finished?(capture)
+                    }
+                    panel.contentView = view; self.panels.append(panel)
+                }
+                self.panels.forEach { $0.orderFrontRegardless() }
+                let active = self.panels.first { $0.frame.contains(NSEvent.mouseLocation) } ?? self.panels[0]
+                active.makeKeyAndOrderFront(nil); active.makeFirstResponder(active.contentView)
+                completion(true)
+            }
         }
-        for panel in panels { panel.orderFrontRegardless() }
-        let active = panels.first { $0.frame.contains(NSEvent.mouseLocation) } ?? panels[0]
-        active.makeKeyAndOrderFront(nil); active.makeFirstResponder(active.contentView)
-        return true
     }
-    func close() { for panel in panels { panel.close() }; panels.removeAll() }
+    func close() { generation += 1; for panel in panels { panel.close() }; panels.removeAll() }
 }

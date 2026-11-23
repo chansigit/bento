@@ -69,7 +69,9 @@ selection.frame.size = CGSize(width: 160, height: 100)
 let selectionWindow = SnipPanel(contentRect: CGRect(x: 0, y: 0, width: 160, height: 100), styleMask: [.borderless], backing: .buffered, defer: false)
 selectionWindow.isReleasedWhenClosed = false; selectionWindow.contentView = selection
 var cropped: CGImage?
-selection.finished = { cropped = $0 }
+selection.finished = { region in
+    cropped = region.flatMap { source.cropping(to: snipPixelRect($0, viewSize: selection.bounds.size, imageSize: CGSize(width: source.width, height: source.height))) }
+}
 func mouseEvent(_ type: NSEvent.EventType, _ point: CGPoint) -> NSEvent {
     NSEvent.mouseEvent(with: type, location: point, modifierFlags: [], timestamp: 0, windowNumber: selectionWindow.windowNumber, context: nil, eventNumber: 0, clickCount: 1, pressure: 1)!
 }
@@ -129,6 +131,8 @@ let automaticallyCopied = preservingClipboard { () -> Data? in
     NSPasteboard.general.clearContents()
     NSPasteboard.general.setString("Bento capture test", forType: .string)
     controller.finishCapture(SnipCapture(snapshot: source, screenFrame: captureDisplay, region: region))
+    let deadline = Date().addingTimeInterval(3)
+    while NSPasteboard.general.data(forType: .png) == nil && Date() < deadline { RunLoop.main.run(until: Date().addingTimeInterval(0.005)) }
     return NSPasteboard.general.data(forType: .png)
 }
 check(controller.editor == nil && controller.pins.count == 1, "capture completes directly as sticker without editor overlay")
@@ -291,3 +295,39 @@ if let screen = NSScreen.main {
     UserDefaults.standard.setVolatileDomain(["languageID": "zh-Hans"], forName: UserDefaults.argumentDomain)
 }
 print("\(checks) total snipping checks passed, including live language changes and toolbar bounds")
+
+
+let asyncBoard = NSPasteboard.withUniqueName()
+let writer = SnipClipboardWriter(pasteboard: asyncBoard)
+var copyFailures = 0
+func finishAsyncCopy() {
+    let deadline = Date().addingTimeInterval(3)
+    while writer.isPending && Date() < deadline { RunLoop.main.run(until: Date().addingTimeInterval(0.005)) }
+    check(!writer.isPending, "background copy completes")
+}
+writer.copy(source) { copyFailures += 1 }
+check(asyncBoard.data(forType: .png) == nil, "PNG encoding and publication are deferred from the input handler")
+finishAsyncCopy()
+check(asyncBoard.data(forType: .png) == snipPNG(SnipDocument(image: source).rendered()!), "background copy preserves full-resolution sRGB pixels")
+writer.copy(source) { copyFailures += 1 }
+asyncBoard.clearContents(); asyncBoard.setString("Copied in another app", forType: .string)
+finishAsyncCopy()
+check(asyncBoard.string(forType: .string) == "Copied in another app", "late PNG cannot replace a newer clipboard copy")
+writer.copy(source) { copyFailures += 1 }
+writer.copy(pattern) { copyFailures += 1 }
+finishAsyncCopy()
+check(asyncBoard.data(forType: .png) == snipPNG(SnipDocument(image: pattern).rendered()!), "newest capture wins while previous encoding is in flight")
+writer.copy(source) { copyFailures += 1 }
+writer.cancel()
+RunLoop.main.run(until: Date().addingTimeInterval(0.1))
+check(asyncBoard.data(forType: .png) == snipPNG(SnipDocument(image: pattern).rendered()!), "cancelled encoding cannot overwrite the clipboard")
+check(copyFailures == 0, "superseded work does not show a failure alert")
+asyncBoard.releaseGlobally()
+
+let cancelledSelection = SnipSelection()
+var presentedAfterCancel = false
+cancelledSelection.show { _ in presentedAfterCancel = true }
+cancelledSelection.close()
+RunLoop.main.run(until: Date().addingTimeInterval(0.3))
+check(cancelledSelection.panels.isEmpty && !presentedAfterCancel, "closing selection cancels a late screen capture result")
+print("\(checks) total snipping checks passed, including background encoding and cancellation")
