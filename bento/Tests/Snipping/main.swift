@@ -55,6 +55,7 @@ check(canvas.imagePoint(CGPoint(x: -20, y: 300)) == CGPoint(x: 0, y: 200), "draw
 let editor = SnipEditor(image: source)
 editor.canvas.document.append(SnipMark(tool: .rectangle, points: [.zero, CGPoint(x: 40, y: 40)], color: .red, width: 2))
 editor.show()
+check(editor.window?.animationBehavior == NSWindow.AnimationBehavior.none, "editor appears without scaling animation")
 let undoEvent = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: .command, timestamp: 0, windowNumber: editor.window!.windowNumber, context: nil, characters: "z", charactersIgnoringModifiers: "z", isARepeat: false, keyCode: 6)!
 // Button shortcut state follows edits as it does after a real canvas gesture.
 editor.canvas.onChange?()
@@ -135,6 +136,7 @@ let automaticallyCopied = preservingClipboard { () -> Data? in
     while NSPasteboard.general.data(forType: .png) == nil && Date() < deadline { RunLoop.main.run(until: Date().addingTimeInterval(0.005)) }
     return NSPasteboard.general.data(forType: .png)
 }
+check(controller.pins.first?.window?.animationBehavior == NSWindow.AnimationBehavior.none && controller.pins.first?.controls?.animationBehavior == NSWindow.AnimationBehavior.none, "sticker and controls appear at their final size")
 check(controller.editor == nil && controller.pins.count == 1, "capture completes directly as sticker without editor overlay")
 let sticker = controller.pins[0]
 check(automaticallyCopied == snipPNG(sticker.renderedImage()!), "capture automatically copies original PNG while preserving desktop sticker")
@@ -331,3 +333,16 @@ cancelledSelection.close()
 RunLoop.main.run(until: Date().addingTimeInterval(0.3))
 check(cancelledSelection.panels.isEmpty && !presentedAfterCancel, "closing selection cancels a late screen capture result")
 print("\(checks) total snipping checks passed, including background encoding and cancellation")
+
+let stableSelection = SnipSelection()
+var selectionPresented = false
+stableSelection.show { success in selectionPresented = success }
+let presentationDeadline = Date().addingTimeInterval(3)
+while !selectionPresented && Date() < presentationDeadline { RunLoop.main.run(until: Date().addingTimeInterval(0.005)) }
+check(selectionPresented && !stableSelection.panels.isEmpty, "selection presents after background capture")
+for panel in stableSelection.panels {
+    check(panel.animationBehavior == .none, "screen snapshot never uses the system scaling animation")
+    check(panel.frame == (panel.contentView as! SnipSelectionView).screenFrame && panel.contentView!.bounds.size == panel.frame.size, "selection overlays exact display bounds")
+}
+stableSelection.close()
+print("\(checks) total snipping checks passed, including presentation without scaling")

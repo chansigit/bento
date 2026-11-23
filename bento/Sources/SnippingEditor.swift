@@ -120,6 +120,7 @@ final class SnipEditor: NSWindowController, NSWindowDelegate {
         initialSize = region.size
         canvas = SnipCanvas(image: image, size: region.size); canvas.frame = region
         let window = SnipPanel(contentRect: screen, styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
+        window.animationBehavior = .none
         window.title = L("Bento 原位截图标注"); window.isReleasedWhenClosed = false; window.hasShadow = false
         window.level = .screenSaver; window.hidesOnDeactivate = false; window.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
         super.init(window: window); window.delegate = self

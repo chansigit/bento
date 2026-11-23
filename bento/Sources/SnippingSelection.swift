@@ -125,6 +125,8 @@ final class SnipSelection {
                 guard !snapshots.isEmpty else { completion(false); return }
                 for (screen, image) in snapshots {
                     let panel = SnipPanel(contentRect: screen.frame, styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
+                    // The default panel animation scales the entire screen snapshot on entry.
+                    panel.animationBehavior = .none
                     panel.title = L("Bento 截图选区"); panel.level = .screenSaver; panel.hasShadow = false; panel.isReleasedWhenClosed = false
                     panel.hidesOnDeactivate = false; panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]; panel.acceptsMouseMovedEvents = true
                     let view = SnipSelectionView(image: image, screen: screen, windows: windows)

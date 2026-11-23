@@ -64,6 +64,7 @@ final class SnipPin: NSWindowController, NSWindowDelegate {
         canvas = SnipPinView(image: image, size: baseSize)
         let centeredFrame = CGRect(x: frame.midX - baseSize.width / 2, y: frame.midY - baseSize.height / 2, width: baseSize.width, height: baseSize.height)
         let panel = SnipPanel(contentRect: originalFrame ?? centeredFrame, styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
+        panel.animationBehavior = .none
         panel.title = L("Bento 贴图"); panel.isReleasedWhenClosed = false; panel.isOpaque = false; panel.backgroundColor = .clear
         panel.level = .floating; panel.hasShadow = true; panel.hidesOnDeactivate = false
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
@@ -100,6 +101,7 @@ final class SnipPin: NSWindowController, NSWindowDelegate {
     }
     private func makeControls() {
         let panel = NSPanel(contentRect: .zero, styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
+        panel.animationBehavior = .none
         panel.title = L("Bento 贴图编辑菜单"); panel.isReleasedWhenClosed = false; panel.isOpaque = false; panel.backgroundColor = .clear
         panel.hasShadow = true; panel.hidesOnDeactivate = false
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
