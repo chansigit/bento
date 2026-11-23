@@ -231,6 +231,14 @@ if let screen = NSScreen.main {
             }
         }
     }
+    for skin in allSkins {
+        UserDefaults.standard.setVolatileDomain(["languageID": "zh-Hans", "skinID": skin.id], forName: UserDefaults.argumentDomain)
+        NotificationCenter.default.post(name: .bentoSkinChanged, object: nil)
+        check(snipPNG(localizedPin.renderedImage()!) == originalPixels, "skin preserves original image pixels: \(skin.id)")
+        let panel = localizedPin.controls!
+        let dark = panel.effectiveAppearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
+        check(panel.contentView!.layer!.backgroundColor == skin.palette(dark: dark).surface.cgColor, "toolbar surface follows skin: \(skin.id)")
+    }
     localizedPin.close()
     UserDefaults.standard.setVolatileDomain(["languageID": "zh-Hans"], forName: UserDefaults.argumentDomain)
 }

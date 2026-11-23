@@ -29,3 +29,16 @@ for (language, _) in BentoLanguage.choices where language != "system" {
     if language != "zh-Hans" && language != "zh-Hant" { assert(L("文件夹着色") != "文件夹着色", language) }
 }
 print("Presentation checks passed: language resolution, all bundled languages, runtime switching, format safety, 15 stable skin IDs")
+
+let lightSurfaces = Set(allSkins.filter { $0.accent != nil }.map { $0.palette(dark: false).surface.description })
+let darkSurfaces = Set(allSkins.filter { $0.accent != nil }.map { $0.palette(dark: true).surface.description })
+assert(lightSurfaces.count == 12 && darkSurfaces.count == 12, "Color skins have distinct backgrounds, not only text colors")
+assert(skin(withID: "sand").palette(dark: false).radius != skin(withID: "aurora").palette(dark: false).radius)
+for skin in allSkins {
+    for dark in [false, true] {
+        let colors = skin.palette(dark: dark)
+        assert(colors.surface.alphaComponent == 1 && colors.card.alphaComponent == 1 && colors.selection.alphaComponent == 1)
+        assert(colors.surface != colors.card, "Cards remain distinct from their panel")
+    }
+}
+print("Skin surface checks passed: distinct opaque backgrounds, cards, borders, selection and corner styles")

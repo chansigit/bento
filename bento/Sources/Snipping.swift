@@ -65,6 +65,7 @@ final class SnipPin: NSWindowController, NSWindowDelegate {
         canvas.askText = { [weak self] _ in self?.textPrompt() }
         makeControls(); positionControls()
         NotificationCenter.default.addObserver(self, selector: #selector(updateLanguage), name: BentoLanguage.changed, object: nil)
+        NotificationCenter.default.addObserver(self, selector: #selector(updateLanguage), name: .bentoSkinChanged, object: nil)
     }
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
     func show() { window?.orderFrontRegardless(); controls?.orderFrontRegardless() }
@@ -92,8 +93,13 @@ final class SnipPin: NSWindowController, NSWindowDelegate {
         panel.title = L("Bento 贴图编辑菜单"); panel.isReleasedWhenClosed = false; panel.isOpaque = false; panel.backgroundColor = .clear
         panel.hasShadow = true; panel.hidesOnDeactivate = false
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
-        let root = NSVisualEffectView(); root.material = .popover; root.state = .active; root.wantsLayer = true
-        root.layer?.cornerRadius = 8; root.layer?.masksToBounds = true; panel.contentView = root
+        let skin = skin(withID: UserDefaults.standard.string(forKey: "skinID"))
+        panel.appearance = skin.appearanceName.flatMap { NSAppearance(named: $0) }
+        let palette = skin.palette(dark: panel.effectiveAppearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua)
+        let root = NSView(); root.wantsLayer = true
+        root.layer?.backgroundColor = palette.surface.cgColor
+        root.layer?.borderWidth = 1; root.layer?.borderColor = palette.border.cgColor
+        root.layer?.cornerRadius = palette.radius; root.layer?.masksToBounds = true; panel.contentView = root
         toggleButton = NSButton(title: L("编辑 ﹀"), target: self, action: #selector(toggleEditing)); toggleButton.bezelStyle = .rounded
         root.addSubview(toggleButton)
         let tools = snipToolControl(target: self, action: #selector(changeTool(_:)), selected: canvas.tool)

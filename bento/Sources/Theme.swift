@@ -37,3 +37,43 @@ func skin(withID id: String?) -> Skin {
 }
 
 extension Notification.Name { static let bentoSkinChanged = Notification.Name("BentoSkinChanged") }
+
+struct SkinPalette {
+    let surface: NSColor
+    let card: NSColor
+    let border: NSColor
+    let selection: NSColor
+    let accent: NSColor
+    let radius: CGFloat
+}
+
+extension Skin {
+    func palette(dark: Bool) -> SkinPalette {
+        // Backgrounds are opaque: the desktop never tints captured window pixels.
+        let tones: (UInt32, UInt32, CGFloat)
+        switch id {
+        case "matcha": tones = (0xE8EEDC, 0x1B251C, 12)
+        case "seasalt": tones = (0xE4F1F8, 0x172835, 14)
+        case "mikan": tones = (0xFFF0DE, 0x30231A, 12)
+        case "sakura": tones = (0xFBE9EF, 0x301E2A, 18)
+        case "lavender": tones = (0xEDE7F6, 0x252036, 18)
+        case "rose": tones = (0xF8E3E7, 0x321D25, 12)
+        case "sand": tones = (0xF2E8D7, 0x2D261C, 7)
+        case "mint": tones = (0xE2F3EC, 0x172C27, 14)
+        case "midnight": tones = (0xE3EAF8, 0x101D36, 14)
+        case "aurora": tones = (0xE2F3ED, 0x102B29, 20)
+        case "ember": tones = (0xFBEADD, 0x332019, 8)
+        case "grape": tones = (0xEDE5F6, 0x291A3D, 20)
+        default: tones = (0xF1F2F4, 0x202124, 12)
+        }
+        let hex = dark ? tones.1 : tones.0
+        let surface = NSColor(srgbRed: CGFloat((hex >> 16) & 255) / 255,
+                              green: CGFloat((hex >> 8) & 255) / 255,
+                              blue: CGFloat(hex & 255) / 255, alpha: 1)
+        let accent = self.accent ?? .systemBlue
+        let card = surface.blended(withFraction: dark ? 0.07 : 0.72, of: .white) ?? surface
+        let border = surface.blended(withFraction: dark ? 0.22 : 0.18, of: dark ? .white : .black) ?? .separatorColor
+        let selection = card.blended(withFraction: dark ? 0.24 : 0.16, of: accent) ?? card
+        return SkinPalette(surface: surface, card: card, border: border, selection: selection, accent: accent, radius: tones.2)
+    }
+}

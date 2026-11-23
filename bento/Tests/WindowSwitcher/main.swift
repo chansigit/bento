@@ -164,3 +164,21 @@ assert(controller.tap == nil && controller.tapSource == nil)
 assert(controller.cached.isEmpty && controller.images.isEmpty)
 defaults.setVolatileDomain(originalArguments, forName: UserDefaults.argumentDomain)
 print("Switcher integration passed: menu, paused shortcut pass-through, lifecycle cleanup, warm cache, in-place refresh, eviction, stale callbacks")
+
+let themed = WindowSwitcherController()
+for skin in allSkins {
+    defaults.setVolatileDomain(["languageID": "zh-Hans", "skinID": skin.id, "windowSwitcher.theme": 0, "windowSwitcher.enabled": false, "windowSwitcher.didMigrate": true], forName: UserDefaults.argumentDomain)
+    themed.preview()
+    let panel = themed.panel!
+    let palette = skin.palette(dark: panel.effectiveAppearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua)
+    let root = panel.contentView!
+    assert(root.layer?.backgroundColor == palette.surface.cgColor)
+    let cards = root.subviews.compactMap { $0 as? WindowSwitcherCard }
+    assert(cards.count == 6)
+    assert(root.subviews.compactMap { $0 as? NSTextField }.first?.stringValue.isEmpty == false, "Footer is populated, not shadowed by the root view tag")
+    assert(cards.allSatisfy { $0.palette.card == palette.card && $0.palette.accent == palette.accent && $0.palette.radius == palette.radius })
+    themed.finish(commit: false)
+}
+themed.shutdown()
+defaults.setVolatileDomain(originalArguments, forName: UserDefaults.argumentDomain)
+print("All 15 switcher previews apply panel and card skins")

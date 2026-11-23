@@ -34,12 +34,12 @@ final class WindowSwitcherCard: NSButton {
     var appIcon: NSImage?
     var caption = ""
     var selected = false
-    var accent = NSColor.systemBlue
+    var palette = skin(withID: nil).palette(dark: false)
     override func draw(_ dirtyRect: NSRect) {
-        let path = NSBezierPath(roundedRect: bounds.insetBy(dx: 2, dy: 2), xRadius: 9, yRadius: 9)
-        (selected ? accent.withAlphaComponent(0.12) : NSColor.clear).setFill()
+        let path = NSBezierPath(roundedRect: bounds.insetBy(dx: 2, dy: 2), xRadius: palette.radius, yRadius: palette.radius)
+        (selected ? palette.selection : palette.card).setFill()
         path.fill()
-        (selected ? accent : NSColor.clear).setStroke()
+        (selected ? palette.accent : palette.border).setStroke()
         path.lineWidth = selected ? 2 : 1
         path.stroke()
         appIcon?.draw(in: NSRect(x: 9, y: bounds.height - 25, width: 16, height: 16))
@@ -375,7 +375,7 @@ final class WindowSwitcherController: NSObject, ObservableObject {
         finish(commit: true)
     }
     func updateFooter() {
-        guard let footer = panel?.contentView?.viewWithTag(-1) as? NSTextField else { return }
+        guard let footer = panel?.contentView?.subviews.compactMap({ $0 as? NSTextField }).first else { return }
         footer.stringValue = demo ? L("示例卡片 · 移动鼠标选择，点击关闭") :
             (dragInProgress ? L("拖到缩略图停留或松开 ⌘ → 切换后再放下文件") : L("鼠标选择 · 点击 / 松开 ⌘ 确认 · ⇥ 切换 · esc 取消")) + "     \(selected + 1) / \(entries.count)"
     }
@@ -490,12 +490,13 @@ final class WindowSwitcherController: NSObject, ObservableObject {
         let root = WindowSwitcherSurface(frame: NSRect(x: 0, y: 0, width: panelWidth, height: panelHeight))
         root.owner = self
         let dark = panel?.effectiveAppearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
-        root.wantsLayer = true; root.layer?.cornerRadius = 16
+        let palette = skin(withID: defaults.string(forKey: "skinID")).palette(dark: dark)
+        root.wantsLayer = true; root.layer?.cornerRadius = palette.radius + 8
         // A solid surface keeps desktop colors and vibrancy out of window previews.
-        root.layer?.backgroundColor = (dark ? NSColor(calibratedWhite: 0.12, alpha: 1) : .white).cgColor
+        root.layer?.backgroundColor = palette.surface.cgColor
         root.layer?.masksToBounds = true
         root.layer?.borderWidth = 0.5
-        root.layer?.borderColor = (dark ? NSColor.white : NSColor.black).withAlphaComponent(0.12).cgColor
+        root.layer?.borderColor = palette.border.cgColor
         let canPreview = CGPreflightScreenCaptureAccess()
         let samples = [L("项目 · 访达"), L("设计文档 · 浏览器"), L("代码 · 编辑器"), L("团队消息"), L("终端"), L("备忘录")]
         let symbols = ["folder", "globe", "curlybraces", "bubble.left.and.bubble.right", "terminal", "note.text"]
@@ -504,13 +505,20 @@ final class WindowSwitcherController: NSObject, ObservableObject {
             frame.origin.x += 12
             frame.origin.y = panelHeight - 12 - (frame.origin.y - CGFloat(firstRow) * (height + switcherCardGap)) - height
             let card = WindowSwitcherCard(frame: frame)
+            card.palette = palette
             card.isBordered = false; card.selected = i == selected; card.tag = i; card.target = self; card.action = #selector(choose(_:))
             if demo {
-                card.caption = samples[i]; card.appIcon = NSImage(systemSymbolName: symbols[i], accessibilityDescription: samples[i])
-                card.appIcon?.size = NSSize(width: 64, height: 64)
+                card.caption = samples[i]
+                if let symbol = NSImage(systemSymbolName: symbols[i], accessibilityDescription: samples[i]) {
+                    card.appIcon = NSImage(size: NSSize(width: 64, height: 64), flipped: false) { rect in
+                        symbol.draw(in: rect)
+                        (dark ? NSColor.white : NSColor.black).setFill()
+                        rect.fill(using: .sourceIn)
+                        return true
+                    }
+                }
             } else {
                 let entry = entries[i]
-                card.accent = skin(withID: defaults.string(forKey: "skinID")).accent ?? .systemBlue
                 card.caption = entry.title + (entry.minimized ? L(" · 已最小化") : "")
                 card.appIcon = entry.app.icon
                 if canPreview, let id = entry.id, let thumbnail = images[id], sameSwitcherWindow(thumbnail.window, entry) { card.preview = thumbnail.image }
