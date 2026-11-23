@@ -320,6 +320,7 @@ final class WindowSwitcherController: NSObject, ObservableObject {
         selected = sender.tag; finish(commit: true)
     }
     func beginPointerSession() {
+        NotificationCenter.default.post(name: .bentoDismissMenu, object: nil)
         pointerLocation = NSEvent.mouseLocation
         sessionScreen = NSScreen.screens.first { $0.frame.contains(NSEvent.mouseLocation) } ?? NSScreen.main
         dragInProgress = CGEventSource.buttonState(.combinedSessionState, button: .left)

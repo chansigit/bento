@@ -22,6 +22,10 @@ swiftc Sources/Localization.swift Sources/ScrollCore.swift Sources/ScrollFlip.sw
     -o build/switcher-tests
 ./build/switcher-tests
 
+echo "==> Checking themed menus"
+swiftc Sources/Localization.swift Sources/Theme.swift Sources/SkinnedMenu.swift Tests/Menu/main.swift -o build/menu-tests
+./build/menu-tests
+
 echo "==> Checking utilities"
 swiftc Sources/Localization.swift Sources/NetworkSpeed.swift Sources/CapsLock.swift Sources/FolderColor.swift Tests/Utilities/main.swift -o build/utility-tests
 ./build/utility-tests
@@ -33,7 +37,7 @@ swiftc Sources/Localization.swift Sources/Theme.swift Sources/SnippingCore.swift
 echo "==> Compiling"
 swiftc -O -wmo Sources/Localization.swift Sources/GTimeCore.swift Sources/ScrollCore.swift Sources/ScrollFlip.swift \
     Sources/DockCore.swift Sources/DockPin.swift \
-    Sources/BrightnessCore.swift Sources/Brightness.swift Sources/Caffeine.swift Sources/Theme.swift \
+    Sources/BrightnessCore.swift Sources/Brightness.swift Sources/Caffeine.swift Sources/Theme.swift Sources/SkinnedMenu.swift \
     Sources/NetworkSpeed.swift Sources/CapsLock.swift Sources/FolderColor.swift \
     Sources/SnippingCore.swift Sources/SnippingEditor.swift Sources/SnippingSelection.swift Sources/Snipping.swift \
     Sources/WifiCore.swift Sources/Wifi.swift Sources/WindowSwitcherCore.swift \
@@ -68,7 +72,7 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
 	<key>CFBundleShortVersionString</key>
 	<string>1.2.1</string>
 	<key>CFBundleVersion</key>
-	<string>4</string>
+	<string>5</string>
 	<key>CFBundleInfoDictionaryVersion</key>
 	<string>6.0</string>
 	<key>LSMinimumSystemVersion</key>

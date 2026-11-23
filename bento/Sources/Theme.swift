@@ -77,3 +77,5 @@ extension Skin {
         return SkinPalette(surface: surface, card: card, border: border, selection: selection, accent: accent, radius: tones.2)
     }
 }
+
+extension Notification.Name { static let bentoDismissMenu = Notification.Name("BentoDismissMenu") }

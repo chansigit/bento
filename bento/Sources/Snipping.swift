@@ -227,6 +227,7 @@ final class SnippingController: NSObject {
         for pin in pins { pin.onClose = nil; pin.close() }; pins.removeAll()
     }
     @objc func capture() {
+        NotificationCenter.default.post(name: .bentoDismissMenu, object: nil)
         guard !pendingCapture, selection == nil else { return }
         if let editor = editor { editor.show(); return }
         guard CGPreflightScreenCaptureAccess() else {

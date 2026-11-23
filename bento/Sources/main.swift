@@ -273,6 +273,8 @@ final class SearchWindowController: NSWindowController, NSSearchFieldDelegate, N
 
 final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var statusItem: NSStatusItem!
+    private let statusMenu = NSMenu()
+    private let menuPresenter = SkinnedMenuController()
     private var timer: Timer?
     private var entries: [TimeEntry] = []
     private var use24h = false
@@ -309,9 +311,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         use24h = defaults.bool(forKey: "use24h")
 
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
-        let menu = NSMenu()
-        menu.delegate = self
-        statusItem.menu = menu
+        statusMenu.delegate = self
+        statusItem.button?.target = self
+        statusItem.button?.action = #selector(toggleStatusMenu)
 
         searchController.onAdd = { [weak self] city in
             guard let self = self else { return false }
@@ -393,9 +395,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         refreshTitle()
     }
 
+    @objc private func toggleStatusMenu() {
+        guard let button = statusItem.button else { return }
+        menuPresenter.toggle(menu: statusMenu, from: button)
+    }
+
     @objc private func openSettings() { windowSwitcher.showSettings() }
 
     func applicationWillTerminate(_ notification: Notification) {
+        menuPresenter.close()
         windowSwitcher.shutdown()
         networkSpeed.stop(); capsLock.stop(); snipping.stop()
     }
@@ -517,7 +525,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             startWifiScan(into: menu)
             return
         }
-        guard menu === statusItem.menu else { return }
+        guard menu === statusMenu else { return }
         menu.removeAllItems()
         menu.appearance = currentSkin.appearanceName.flatMap { NSAppearance(named: $0) }
         let now = Date()
@@ -674,6 +682,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     private func populateWifiMenu(nets: [WifiNetwork], hint: String?) {
         guard let menu = wifiSubmenu else { return }
+        defer { menuPresenter.refresh(menu: menu) }
         menu.removeAllItems()
         if let hint = hint {
             let item = NSMenuItem(title: hint, action: nil, keyEquivalent: "")
