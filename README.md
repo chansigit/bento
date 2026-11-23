@@ -10,7 +10,7 @@
   &nbsp; · &nbsp;
   <a href="bento/README.md">使用指南</a>
   &nbsp; · &nbsp;
-  <a href="https://github.com/chansigit/bento/releases/tag/v1.2.2">看看这次更新</a>
+  <a href="https://github.com/chansigit/bento/releases/latest">看看这次更新</a>
 </p>
 <p align="center"><sub>原生 macOS 应用 · Apple Silicon · 无第三方运行时依赖</sub></p>
 
