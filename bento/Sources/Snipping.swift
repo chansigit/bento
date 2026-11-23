@@ -270,6 +270,7 @@ final class SnippingController: NSObject {
         guard rect.width * rect.height <= 40_000_000, let cropped = capture.snapshot.cropping(to: rect),
               let image = SnipDocument(image: cropped).rendered() else { snipError(L("无法生成贴图，请缩小截图区域后重试。")); return }
         pin(image, frame: capture.region.offsetBy(dx: capture.screenFrame.minX, dy: capture.screenFrame.minY))
+        if !copySnip(image) { snipError(L("无法复制图像。")) }
     }
     func edit(_ image: CGImage, capture: SnipCapture? = nil) {
         guard Double(image.width) * Double(image.height) <= 40_000_000 else { snipError(L("图像超过 4000 万像素，请缩小截图区域。")); return }

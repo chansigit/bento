@@ -112,18 +112,8 @@ let wheel = CGEvent(scrollWheelEvent2Source: nil, units: .line, wheelCount: 1, w
 inline.canvas.scrollWheel(with: NSEvent(cgEvent: wheel)!)
 check(inline.canvas.frame.width > 40 && snipPNG(inline.canvas.document.rendered()!) == originalPNG, "wheel event zooms display without touching pixels")
 inline.close()
-let controller = SnippingController()
-let captureDisplay = CGRect(x: NSScreen.main!.visibleFrame.minX + 100, y: NSScreen.main!.visibleFrame.minY + 100, width: display.width, height: display.height)
-controller.finishCapture(SnipCapture(snapshot: source, screenFrame: captureDisplay, region: region))
-check(controller.editor == nil && controller.pins.count == 1, "capture completes directly as sticker without editor overlay")
-let sticker = controller.pins[0]
-check(sticker.window!.frame == region.offsetBy(dx: captureDisplay.minX, dy: captureDisplay.minY), "sticker preserves exact capture position and point size")
-check(sticker.image.width == 80 && sticker.image.height == 80 && sticker.window!.frame.size == region.size, "Retina sticker preserves original pixels and logical size")
-check(sticker.window?.level == .floating && sticker.window?.isOpaque == false, "sticker is a small floating window, not a full-screen dimming surface")
-check(!sticker.editing && sticker.controls?.frame.height == 26, "editing menu starts collapsed")
-check(sticker.window!.firstResponder === sticker.canvas, "fresh capture immediately focuses its sticker canvas")
-// Restore the user's clipboard before assertions, including all original data types.
-func copiedPNG(_ pin: SnipPin, characters: String = "c", flags: NSEvent.ModifierFlags = .command) -> Data? {
+// Restore all clipboard data before assertions, even when a check fails.
+func preservingClipboard<T>(_ action: () -> T) -> T {
     let board = NSPasteboard.general
     let saved = (board.pasteboardItems ?? []).map { item -> NSPasteboardItem in
         let copy = NSPasteboardItem()
@@ -131,12 +121,34 @@ func copiedPNG(_ pin: SnipPin, characters: String = "c", flags: NSEvent.Modifier
         return copy
     }
     defer { board.clearContents(); if !saved.isEmpty { board.writeObjects(saved) } }
-    board.clearContents(); board.setString("Bento shortcut test", forType: .string)
-    let event = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: flags, timestamp: 0,
-        windowNumber: pin.window!.windowNumber, context: nil, characters: characters,
-        charactersIgnoringModifiers: characters, isARepeat: false, keyCode: 8)!
-    let handled = pin.window!.performKeyEquivalent(with: event)
-    return handled ? board.data(forType: .png) : nil
+    return action()
+}
+let controller = SnippingController()
+let captureDisplay = CGRect(x: NSScreen.main!.visibleFrame.minX + 100, y: NSScreen.main!.visibleFrame.minY + 100, width: display.width, height: display.height)
+let automaticallyCopied = preservingClipboard { () -> Data? in
+    NSPasteboard.general.clearContents()
+    NSPasteboard.general.setString("Bento capture test", forType: .string)
+    controller.finishCapture(SnipCapture(snapshot: source, screenFrame: captureDisplay, region: region))
+    return NSPasteboard.general.data(forType: .png)
+}
+check(controller.editor == nil && controller.pins.count == 1, "capture completes directly as sticker without editor overlay")
+let sticker = controller.pins[0]
+check(automaticallyCopied == snipPNG(sticker.renderedImage()!), "capture automatically copies original PNG while preserving desktop sticker")
+check(sticker.window!.frame == region.offsetBy(dx: captureDisplay.minX, dy: captureDisplay.minY), "sticker preserves exact capture position and point size")
+check(sticker.image.width == 80 && sticker.image.height == 80 && sticker.window!.frame.size == region.size, "Retina sticker preserves original pixels and logical size")
+check(sticker.window?.level == .floating && sticker.window?.isOpaque == false, "sticker is a small floating window, not a full-screen dimming surface")
+check(!sticker.editing && sticker.controls?.frame.height == 26, "editing menu starts collapsed")
+check(sticker.window!.firstResponder === sticker.canvas, "fresh capture immediately focuses its sticker canvas")
+func copiedPNG(_ pin: SnipPin, characters: String = "c", flags: NSEvent.ModifierFlags = .command) -> Data? {
+    return preservingClipboard {
+        let board = NSPasteboard.general
+        board.clearContents(); board.setString("Bento shortcut test", forType: .string)
+        let event = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: flags, timestamp: 0,
+            windowNumber: pin.window!.windowNumber, context: nil, characters: characters,
+            charactersIgnoringModifiers: characters, isARepeat: false, keyCode: 8)!
+        let handled = pin.window!.performKeyEquivalent(with: event)
+        return handled ? board.data(forType: .png) : nil
+    }
 }
 check(copiedPNG(sticker) == snipPNG(sticker.renderedImage()!), "Cmd+C copies fresh capture without clicking or expanding editor")
 check(copiedPNG(sticker, characters: "C", flags: [.command, .capsLock]) == snipPNG(sticker.renderedImage()!), "Caps Lock does not break copy shortcut")
@@ -191,7 +203,14 @@ sticker.hide(); check(!controls.isVisible, "hiding sticker also hides editing me
 sticker.show(); check(controls.isVisible, "showing sticker restores editing menu")
 sticker.close()
 check(!controls.isVisible && sticker.controls == nil, "closing sticker cleans up its menu")
-controller.finishCapture(nil)
+let cancelKeepsClipboard = preservingClipboard { () -> Bool in
+    let board = NSPasteboard.general
+    board.clearContents(); board.setString("Keep this text", forType: .string)
+    let changeCount = board.changeCount
+    controller.finishCapture(nil)
+    return board.changeCount == changeCount && board.string(forType: .string) == "Keep this text"
+}
+check(cancelKeepsClipboard, "cancelling capture leaves clipboard unchanged")
 check(controller.editor == nil && controller.pins.isEmpty, "cancellation does not create a sticker")
 controller.pin(source)
 check(controller.pins.count == 1 && controller.pins[0].window?.isVisible == true, "visible floating pin")
