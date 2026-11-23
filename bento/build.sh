@@ -7,21 +7,35 @@ cd "$(dirname "$0")"
 
 echo "==> Running tests"
 mkdir -p build
-swiftc Sources/GTimeCore.swift Sources/ScrollCore.swift Sources/DockCore.swift \
+cp -R Resources/*.lproj build/
+python3 Tests/Localization/check_catalogs.py
+swiftc Sources/Localization.swift Sources/Theme.swift Tests/Localization/main.swift -o build/localization-tests
+./build/localization-tests
+swiftc Sources/Localization.swift Sources/GTimeCore.swift Sources/ScrollCore.swift Sources/DockCore.swift \
     Sources/BrightnessCore.swift Sources/WifiCore.swift Sources/WindowSwitcherCore.swift Tests/main.swift -o build/tests
 ./build/tests
 
 echo "==> Checking switcher integration"
-swiftc Sources/ScrollCore.swift Sources/ScrollFlip.swift Sources/Theme.swift \
+swiftc Sources/Localization.swift Sources/ScrollCore.swift Sources/ScrollFlip.swift Sources/Theme.swift \
     Sources/WindowSwitcherCore.swift Sources/WindowSwitcherWindows.swift \
     Sources/WindowSwitcherSettings.swift Sources/WindowSwitcher.swift Tests/WindowSwitcher/main.swift \
     -o build/switcher-tests
 ./build/switcher-tests
 
+echo "==> Checking utilities"
+swiftc Sources/Localization.swift Sources/NetworkSpeed.swift Sources/CapsLock.swift Sources/FolderColor.swift Tests/Utilities/main.swift -o build/utility-tests
+./build/utility-tests
+
+echo "==> Checking snipping"
+swiftc Sources/Localization.swift Sources/SnippingCore.swift Sources/SnippingEditor.swift Sources/SnippingSelection.swift Sources/Snipping.swift Tests/Snipping/main.swift -o build/snipping-tests
+./build/snipping-tests
+
 echo "==> Compiling"
-swiftc -O -wmo Sources/GTimeCore.swift Sources/ScrollCore.swift Sources/ScrollFlip.swift \
+swiftc -O -wmo Sources/Localization.swift Sources/GTimeCore.swift Sources/ScrollCore.swift Sources/ScrollFlip.swift \
     Sources/DockCore.swift Sources/DockPin.swift \
     Sources/BrightnessCore.swift Sources/Brightness.swift Sources/Caffeine.swift Sources/Theme.swift \
+    Sources/NetworkSpeed.swift Sources/CapsLock.swift Sources/FolderColor.swift \
+    Sources/SnippingCore.swift Sources/SnippingEditor.swift Sources/SnippingSelection.swift Sources/Snipping.swift \
     Sources/WifiCore.swift Sources/Wifi.swift Sources/WindowSwitcherCore.swift \
     Sources/WindowSwitcherWindows.swift Sources/WindowSwitcherSettings.swift Sources/WindowSwitcher.swift Sources/main.swift -o build/Bento
 
@@ -29,6 +43,7 @@ echo "==> Packaging Bento.app"
 APP=build/Bento.app
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
+cp -R Resources/*.lproj "$APP/Contents/Resources/"
 cp Resources/Bento.icns "$APP/Contents/Resources/Bento.icns"
 cp build/Bento "$APP/Contents/MacOS/Bento"
 cat > "$APP/Contents/Info.plist" <<'PLIST'
@@ -38,6 +53,8 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
 <dict>
 	<key>CFBundleIdentifier</key>
 	<string>com.sijie.gtime</string>
+	<key>CFBundleDevelopmentRegion</key>
+	<string>en</string>
 	<key>CFBundleName</key>
 	<string>Bento</string>
 	<key>CFBundleDisplayName</key>
@@ -49,9 +66,9 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>
-	<string>1.1</string>
+	<string>1.2</string>
 	<key>CFBundleVersion</key>
-	<string>2</string>
+	<string>3</string>
 	<key>CFBundleInfoDictionaryVersion</key>
 	<string>6.0</string>
 	<key>LSMinimumSystemVersion</key>
@@ -61,9 +78,9 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
 	<key>NSHighResolutionCapable</key>
 	<true/>
 	<key>NSLocationWhenInUseUsageDescription</key>
-	<string>扫描附近 Wi-Fi 网络时,macOS 要求定位权限才能显示网络名称。</string>
+	<string>macOS requires location permission to display nearby Wi-Fi network names.</string>
 	<key>NSLocationUsageDescription</key>
-	<string>扫描附近 Wi-Fi 网络时,macOS 要求定位权限才能显示网络名称。</string>
+	<string>macOS requires location permission to display nearby Wi-Fi network names.</string>
 </dict>
 </plist>
 PLIST

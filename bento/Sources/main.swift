@@ -20,6 +20,7 @@ final class SearchWindowController: NSWindowController, NSSearchFieldDelegate, N
     }
 
     private let searchField = NSSearchField()
+    private var hintLabel: NSTextField?
     private let tableView = NSTableView()
     private var rows: [Row] = []
     private let geocoder = CLGeocoder()
@@ -31,7 +32,7 @@ final class SearchWindowController: NSWindowController, NSSearchFieldDelegate, N
             contentRect: NSRect(x: 0, y: 0, width: 460, height: 380),
             styleMask: [.titled, .closable, .resizable],
             backing: .buffered, defer: false)
-        panel.title = "添加城市"
+        panel.title = L("添加城市")
         panel.isReleasedWhenClosed = false
         panel.level = .floating
         panel.hidesOnDeactivate = false          // keep the in-progress search alive when switching apps
@@ -41,13 +42,13 @@ final class SearchWindowController: NSWindowController, NSSearchFieldDelegate, N
         let content = NSView()
         panel.contentView = content
 
-        searchField.placeholderString = "输入城市名(中文 / 英文 / 拼音),如:北京、Tokyo、xianggang"
+        searchField.placeholderString = L("输入城市名(中文 / 英文 / 拼音),如:北京、Tokyo、xianggang")
         searchField.delegate = self
         searchField.translatesAutoresizingMaskIntoConstraints = false
         content.addSubview(searchField)
 
         let column = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("city"))
-        column.title = "城市"
+        column.title = L("城市")
         tableView.addTableColumn(column)
         tableView.headerView = nil
         tableView.rowHeight = 26
@@ -62,7 +63,9 @@ final class SearchWindowController: NSWindowController, NSSearchFieldDelegate, N
         scroll.translatesAutoresizingMaskIntoConstraints = false
         content.addSubview(scroll)
 
-        let hint = NSTextField(labelWithString: "回车或双击添加 · Esc 关闭")
+        let hint = NSTextField(labelWithString: L("回车或双击添加 · Esc 关闭"))
+        hintLabel = hint
+        NotificationCenter.default.addObserver(self, selector: #selector(updateLanguage), name: BentoLanguage.changed, object: nil)
         hint.textColor = .secondaryLabelColor
         hint.font = NSFont.systemFont(ofSize: NSFont.smallSystemFontSize)
         hint.translatesAutoresizingMaskIntoConstraints = false
@@ -81,7 +84,14 @@ final class SearchWindowController: NSWindowController, NSSearchFieldDelegate, N
         ])
     }
 
+    @objc private func updateLanguage() {
+        window?.title = L("添加城市")
+        searchField.placeholderString = L("输入城市名(中文 / 英文 / 拼音),如:北京、Tokyo、xianggang")
+        hintLabel?.stringValue = L("回车或双击添加 · Esc 关闭")
+        tableView.reloadData()
+    }
     func show() {
+        updateLanguage()
         // Already open (e.g. user re-picked the menu item): just refocus, keep the query.
         if window?.isVisible == true {
             NSApp.activate(ignoringOtherApps: true)
@@ -115,7 +125,7 @@ final class SearchWindowController: NSWindowController, NSSearchFieldDelegate, N
     }
 
     private func display(_ c: City) -> String {
-        let name = c.zh == c.en ? c.en : "\(c.zh) \(c.en)"
+        let name = BentoLanguage.current.hasPrefix("zh") ? (c.zh == c.en ? c.en : "\(c.zh) \(c.en)") : c.en
         return "\(c.flag) \(name) · \(c.tzID) (\(offsetLabel(c.tzID)))"
     }
 
@@ -136,9 +146,9 @@ final class SearchWindowController: NSWindowController, NSSearchFieldDelegate, N
     private func startOnlineSearch(_ query: String) {
         geocoder.cancelGeocode()
         rows = rows.filter { if case .city = $0 { return true } else { return false } }
-        rows.append(.status("正在在线搜索 \u{201C}\(query)\u{201D}…"))
+        rows.append(.status(L("正在在线搜索 \u{201C}%@\u{201D}…", String(describing: query))))
         tableView.reloadData()
-        geocoder.geocodeAddressString(query, in: nil, preferredLocale: Locale(identifier: "zh_CN")) { [weak self] placemarks, error in
+        geocoder.geocodeAddressString(query, in: nil, preferredLocale: BentoLanguage.locale) { [weak self] placemarks, error in
             guard let self = self else { return }
             // Stale response: the query has changed since this request started.
             let current = self.searchField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -157,7 +167,7 @@ final class SearchWindowController: NSWindowController, NSSearchFieldDelegate, N
                                   tzID: tz.identifier))
             }
             if found.isEmpty {
-                let reason = error == nil ? "未找到 \u{201C}\(query)\u{201D}" : "在线搜索失败,请检查网络后重试"
+                let reason = error == nil ? L("未找到 \u{201C}%@\u{201D}", String(describing: query)) : L("在线搜索失败,请检查网络后重试")
                 self.rows.append(.status(reason))
             } else {
                 let firstOnline = self.rows.count
@@ -213,7 +223,7 @@ final class SearchWindowController: NSWindowController, NSSearchFieldDelegate, N
         case .city(let city):
             if onAdd?(city) == false {
                 NSSound.beep()
-                rows = [.status("已添加过该时区,不重复添加")]
+                rows = [.status(L("已添加过该时区,不重复添加"))]
                 tableView.reloadData()
             } else {
                 closePanel()
@@ -249,7 +259,7 @@ final class SearchWindowController: NSWindowController, NSSearchFieldDelegate, N
             field.stringValue = display(c)
             field.textColor = .labelColor
         case .searchOnline(let q):
-            field.stringValue = "🔍 在线搜索 \u{201C}\(q)\u{201D}(小城市、任意地名)"
+            field.stringValue = L("🔍 在线搜索 \u{201C}%@\u{201D}(小城市、任意地名)", String(describing: q))
             field.textColor = .labelColor
         case .status(let text):
             field.stringValue = text
@@ -266,7 +276,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var timer: Timer?
     private var entries: [TimeEntry] = []
     private var use24h = false
-    private let searchController = SearchWindowController()
+    private lazy var searchController = SearchWindowController()
     private let defaults = UserDefaults.standard
     private lazy var scrollController = ScrollFlipController(
         settings: decodeScrollSettings(defaults.data(forKey: "scrollSettings") ?? Data()))
@@ -276,12 +286,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private lazy var currentSkin: Skin = skin(withID: defaults.string(forKey: "skinID"))
     private let wifiController = WifiController()
     private let windowSwitcher = WindowSwitcherController()
+    private let networkSpeed = NetworkSpeedController()
+    private let capsLock = CapsLockController()
+    private let folderColors = FolderColorController()
+    private let snipping = SnippingController()
     private var wifiSubmenu: NSMenu?
     private var brightnessTargets: [BrightnessTarget] = []
     private let menuDateFormatter: DateFormatter = {
         let f = DateFormatter()
-        f.locale = Locale(identifier: "zh_CN")
-        f.dateFormat = "M月d日 EEE"
+        f.locale = BentoLanguage.locale
+        f.setLocalizedDateFormatFromTemplate("MMMdEEE")
         return f
     }()
 
@@ -308,7 +322,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             return true
         }
 
-        refreshTitle()
+        NotificationCenter.default.addObserver(self, selector: #selector(presentationChanged), name: BentoLanguage.changed, object: nil)
+        NotificationCenter.default.addObserver(self, selector: #selector(presentationChanged), name: .bentoSkinChanged, object: nil)
+        NotificationCenter.default.addObserver(self, selector: #selector(localeChanged), name: NSLocale.currentLocaleDidChangeNotification, object: nil)
+        presentationChanged()
         scheduleMinuteTimer()
 
         NSWorkspace.shared.notificationCenter.addObserver(
@@ -340,6 +357,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             self, selector: #selector(scrollBaselineChanged),
             name: NSNotification.Name("SwipeScrollDirectionDidChangeNotification"), object: nil)
 
+        networkSpeed.onChange = { [weak self] in self?.refreshTitle() }
+        capsLock.onChange = { [weak self] in self?.refreshTitle() }
+        networkSpeed.start(); capsLock.start(); snipping.start()
         windowSwitcher.start()
         if CommandLine.arguments.contains("--check-window-switcher") {
             windowSwitcher.showSettings()
@@ -360,10 +380,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         return true
     }
 
+    @objc private func localeChanged() {
+        if (defaults.string(forKey: "languageID") ?? "system") == "system" {
+            DispatchQueue.main.async { NotificationCenter.default.post(name: BentoLanguage.changed, object: nil) }
+        }
+    }
+    @objc private func presentationChanged() {
+        currentSkin = skin(withID: defaults.string(forKey: "skinID"))
+        NSApp.appearance = currentSkin.appearanceName.flatMap { NSAppearance(named: $0) }
+        windowSwitcher.settings?.appearance = NSApp.appearance
+        windowSwitcher.settings?.title = L("Bento 设置")
+        refreshTitle()
+    }
+
     @objc private func openSettings() { windowSwitcher.showSettings() }
 
     func applicationWillTerminate(_ notification: Notification) {
         windowSwitcher.shutdown()
+        networkSpeed.stop(); capsLock.stop(); snipping.stop()
     }
 
     @objc private func screensChanged() {
@@ -388,6 +422,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private func refreshTitle() {
         var text = statusText(entries: entries, now: Date(), local: TimeZone.current, use24h: use24h)
         if caffeineController.isActive { text = "☕️ " + text }
+        if capsLock.enabled && capsLock.isOn { text = "⇪ " + text }
         let font = NSFont.monospacedDigitSystemFont(ofSize: 12, weight: .regular)
         var attrs: [NSAttributedString.Key: Any] = [.font: font, .foregroundColor: NSColor.labelColor]
         if let accent = currentSkin.accent { attrs[.foregroundColor] = accent }
@@ -402,6 +437,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
         guard let button = statusItem.button else { return }
         button.attributedTitle = title
+        button.image = networkSpeed.statusImage()
+        button.imagePosition = .imageRight
         button.wantsLayer = true
         button.layer?.cornerRadius = 5
         button.effectiveAppearance.performAsCurrentDrawingAppearance {
@@ -453,8 +490,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     /// Two-line city row: "flag name …… big time" / small gray date.
     private func cityAttributedTitle(_ e: TimeEntry, tz: TimeZone, now: Date) -> NSAttributedString {
         let dateFmt = menuDateFormatter
+        dateFmt.locale = BentoLanguage.locale
+        dateFmt.setLocalizedDateFormatFromTemplate("MMMdEEE")
         dateFmt.timeZone = tz
-        let name = e.zh == e.en ? e.en : "\(e.zh) \(e.en)"
+        let name = BentoLanguage.current.hasPrefix("zh") ? (e.zh == e.en ? e.en : "\(e.zh) \(e.en)") : e.en
         let ps = NSMutableParagraphStyle()
         ps.tabStops = [NSTextTab(type: .rightTabStopType, location: 250)]
         ps.paragraphSpacingBefore = 2
@@ -483,9 +522,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menu.appearance = currentSkin.appearanceName.flatMap { NSAppearance(named: $0) }
         let now = Date()
 
-        menu.addItem(sectionHeader("世界时钟"))
+        menu.addItem(sectionHeader(L("世界时钟")))
         if entries.isEmpty {
-            let empty = NSMenuItem(title: "还没有添加城市", action: nil, keyEquivalent: "")
+            let empty = NSMenuItem(title: L("还没有添加城市"), action: nil, keyEquivalent: "")
             empty.isEnabled = false
             menu.addItem(empty)
         }
@@ -496,18 +535,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             item.attributedTitle = cityAttributedTitle(e, tz: tz, now: now)
 
             let sub = NSMenu()
-            let remove = NSMenuItem(title: "移除", action: #selector(removeEntry(_:)), keyEquivalent: "")
+            let remove = NSMenuItem(title: L("移除"), action: #selector(removeEntry(_:)), keyEquivalent: "")
             remove.target = self
             remove.tag = i
             sub.addItem(remove)
             if i > 0 {
-                let up = NSMenuItem(title: "上移", action: #selector(moveEntryUp(_:)), keyEquivalent: "")
+                let up = NSMenuItem(title: L("上移"), action: #selector(moveEntryUp(_:)), keyEquivalent: "")
                 up.target = self
                 up.tag = i
                 sub.addItem(up)
             }
             if i < entries.count - 1 {
-                let down = NSMenuItem(title: "下移", action: #selector(moveEntryDown(_:)), keyEquivalent: "")
+                let down = NSMenuItem(title: L("下移"), action: #selector(moveEntryDown(_:)), keyEquivalent: "")
                 down.target = self
                 down.tag = i
                 sub.addItem(down)
@@ -516,26 +555,39 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             menu.addItem(item)
         }
 
-        let add = NSMenuItem(title: "添加城市…", action: #selector(openSearch), keyEquivalent: "n")
+        let add = NSMenuItem(title: L("添加城市…"), action: #selector(openSearch), keyEquivalent: "n")
         add.target = self
         menu.addItem(add)
 
-        let fmt = NSMenuItem(title: "24 小时制", action: #selector(toggle24h), keyEquivalent: "")
+        let fmt = NSMenuItem(title: L("24 小时制"), action: #selector(toggle24h), keyEquivalent: "")
         fmt.target = self
         fmt.state = use24h ? .on : .off
         menu.addItem(fmt)
 
         menu.addItem(.separator())
-        menu.addItem(sectionHeader("窗口与输入"))
+        menu.addItem(sectionHeader(L("窗口与输入")))
         menu.addItem(windowSwitcher.menuItem())
         menu.addItem(buildDockMenuItem())
         addScrollSection(to: menu)
+        menu.addItem(capsLock.menuItem())
 
         menu.addItem(.separator())
-        menu.addItem(sectionHeader("显示与连接"))
+        menu.addItem(sectionHeader(L("截图与贴图")))
+        snipping.menuItems().forEach { menu.addItem($0) }
+
+        menu.addItem(.separator())
+        menu.addItem(sectionHeader(L("文件与文件夹")))
+        let folderColor = NSMenuItem(title: L("文件夹着色…"), action: #selector(FolderColorController.chooseFolders), keyEquivalent: "")
+        folderColor.image = NSImage(systemSymbolName: "folder.badge.gearshape", accessibilityDescription: nil)
+        folderColor.target = folderColors
+        menu.addItem(folderColor)
+
+        menu.addItem(.separator())
+        menu.addItem(sectionHeader(L("显示与连接")))
         menu.addItem(buildBrightnessMenuItem())
         menu.addItem(buildWifiMenuItem())
-        let caffeine = NSMenuItem(title: "防止休眠", action: #selector(toggleCaffeine), keyEquivalent: "")
+        menu.addItem(networkSpeed.menuItem())
+        let caffeine = NSMenuItem(title: L("防止休眠"), action: #selector(toggleCaffeine), keyEquivalent: "")
         caffeine.image = NSImage(systemSymbolName: "cup.and.saucer", accessibilityDescription: nil)
         caffeine.target = self
         caffeine.state = caffeineController.isActive ? .on : .off
@@ -544,18 +596,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menu.addItem(.separator())
         menu.addItem(sectionHeader("Bento"))
         menu.addItem(buildSkinMenuItem())
-        let login = NSMenuItem(title: "登录时启动", action: #selector(toggleLaunchAtLogin), keyEquivalent: "")
+        menu.addItem(buildLanguageMenuItem())
+        let login = NSMenuItem(title: L("登录时启动"), action: #selector(toggleLaunchAtLogin), keyEquivalent: "")
         login.target = self
         login.state = launchAtLoginEnabled() ? .on : .off
         menu.addItem(login)
 
-        let settings = NSMenuItem(title: "Bento 设置…", action: #selector(openSettings), keyEquivalent: ",")
+        let settings = NSMenuItem(title: L("Bento 设置…"), action: #selector(openSettings), keyEquivalent: ",")
         settings.target = self
         settings.image = NSImage(systemSymbolName: "gearshape", accessibilityDescription: nil)
         menu.addItem(settings)
         menu.addItem(.separator())
 
-        let quit = NSMenuItem(title: "退出 Bento", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
+        let quit = NSMenuItem(title: L("退出 Bento"), action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
         menu.addItem(quit)
     }
 
@@ -589,11 +642,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     // MARK: Wi-Fi signal
 
     private func buildWifiMenuItem() -> NSMenuItem {
-        let root = NSMenuItem(title: "Wi-Fi 信号", action: nil, keyEquivalent: "")
+        let root = NSMenuItem(title: L("Wi-Fi 信号"), action: nil, keyEquivalent: "")
         root.image = NSImage(systemSymbolName: "wifi", accessibilityDescription: nil)
         let sub = NSMenu()
         sub.delegate = self
-        let hint = NSMenuItem(title: "打开以扫描…", action: nil, keyEquivalent: "")
+        let hint = NSMenuItem(title: L("打开以扫描…"), action: nil, keyEquivalent: "")
         hint.isEnabled = false
         sub.addItem(hint)
         wifiSubmenu = sub
@@ -609,7 +662,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         guard !wifiController.isScanning else { return }
         wifiController.requestLocationIfNeeded()
         menu.removeAllItems()
-        let scanning = NSMenuItem(title: "正在扫描附近网络…", action: nil, keyEquivalent: "")
+        let scanning = NSMenuItem(title: L("正在扫描附近网络…"), action: nil, keyEquivalent: "")
         scanning.isEnabled = false
         menu.addItem(scanning)
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
@@ -650,7 +703,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             menu.addItem(item)
         }
         if nets.isEmpty {
-            let none = NSMenuItem(title: "未发现网络", action: nil, keyEquivalent: "")
+            let none = NSMenuItem(title: L("未发现网络"), action: nil, keyEquivalent: "")
             none.isEnabled = false
             menu.addItem(none)
         }
@@ -659,7 +712,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     // MARK: Skins
 
     private func buildSkinMenuItem() -> NSMenuItem {
-        let root = NSMenuItem(title: "外观", action: nil, keyEquivalent: "")
+        let root = NSMenuItem(title: L("外观"), action: nil, keyEquivalent: "")
         root.image = NSImage(systemSymbolName: "paintpalette", accessibilityDescription: nil)
         let sub = NSMenu()
         for s in allSkins {
@@ -673,11 +726,29 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         return root
     }
 
+    private func buildLanguageMenuItem() -> NSMenuItem {
+        let root = NSMenuItem(title: L("语言"), action: nil, keyEquivalent: "")
+        root.image = NSImage(systemSymbolName: "globe", accessibilityDescription: nil)
+        let menu = NSMenu()
+        for (id, name) in BentoLanguage.choices {
+            let item = NSMenuItem(title: id == "system" ? L("跟随系统") : name, action: #selector(setLanguage(_:)), keyEquivalent: "")
+            item.target = self; item.representedObject = id
+            item.state = id == (defaults.string(forKey: "languageID") ?? "system") ? .on : .off
+            menu.addItem(item)
+        }
+        root.submenu = menu; return root
+    }
+    @objc private func setLanguage(_ sender: NSMenuItem) {
+        guard let id = sender.representedObject as? String else { return }
+        defaults.set(id, forKey: "languageID")
+        NotificationCenter.default.post(name: BentoLanguage.changed, object: nil)
+    }
+
     @objc private func setSkin(_ sender: NSMenuItem) {
         guard let id = sender.representedObject as? String else { return }
         currentSkin = skin(withID: id)
         defaults.set(id, forKey: "skinID")
-        refreshTitle()
+        NotificationCenter.default.post(name: .bentoSkinChanged, object: nil)
     }
 
     @objc private func toggleCaffeine() {
@@ -700,15 +771,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let baseline = systemNaturalScrolling()
 
         let mouseItem = NSMenuItem()
-        mouseItem.view = scrollRow("鼠标滚动", current: s.mouse, tag: 0)
+        mouseItem.view = scrollRow(L("鼠标滚动"), current: s.mouse, tag: 0)
         menu.addItem(mouseItem)
         let tpItem = NSMenuItem()
-        tpItem.view = scrollRow("触控板滚动", current: s.trackpad, tag: 1)
+        tpItem.view = scrollRow(L("触控板滚动"), current: s.trackpad, tag: 1)
         menu.addItem(tpItem)
 
         let flips = computeFlips(settings: s, baselineNatural: baseline)
         if shouldRunTap(flips) && !hasAccessibilityPermission(prompt: false) {
-            let perm = NSMenuItem(title: "⚠️ 授予辅助功能权限…", action: #selector(openAccessibilitySettings), keyEquivalent: "")
+            let perm = NSMenuItem(title: L("⚠️ 授予辅助功能权限…"), action: #selector(openAccessibilitySettings), keyEquivalent: "")
             perm.target = self
             menu.addItem(perm)
         }
@@ -725,7 +796,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         label.frame = NSRect(x: 20, y: 6, width: 110, height: 18)
         container.addSubview(label)
 
-        let seg = NSSegmentedControl(labels: ["自然", "反转"], trackingMode: .selectOne,
+        let seg = NSSegmentedControl(labels: [L("自然"), L("反转")], trackingMode: .selectOne,
                                      target: self, action: #selector(scrollSegChanged(_:)))
         seg.segmentDistribution = .fillEqually
         seg.selectedSegment = (current == .reverse) ? 1 : 0
@@ -760,17 +831,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let displays = listDockDisplays()
         let current = dockController.targetName
 
-        let root = NSMenuItem(title: "Dock 固定", action: nil, keyEquivalent: "")
+        let root = NSMenuItem(title: L("Dock 固定"), action: nil, keyEquivalent: "")
         root.image = NSImage(systemSymbolName: "pin", accessibilityDescription: nil)
         let sub = NSMenu()
 
-        let off = NSMenuItem(title: "关闭(不固定)", action: #selector(setDockTarget(_:)), keyEquivalent: "")
+        let off = NSMenuItem(title: L("关闭(不固定)"), action: #selector(setDockTarget(_:)), keyEquivalent: "")
         off.target = self
         off.state = current == nil ? .on : .off
         sub.addItem(off)
 
         for d in displays {
-            let title = d.isMain ? "\(d.name)(主)" : d.name
+            let title = d.isMain ? L("%@(主)", String(describing: d.name)) : d.name
             let item = NSMenuItem(title: title, action: #selector(setDockTarget(_:)), keyEquivalent: "")
             item.target = self
             item.representedObject = d.name
@@ -780,7 +851,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
         sub.addItem(.separator())
         if let cur = currentDockDisplayID(), let info = displays.first(where: { $0.id == cur }) {
-            let line = NSMenuItem(title: "Dock 当前在:\(info.name)", action: nil, keyEquivalent: "")
+            let line = NSMenuItem(title: L("Dock 当前在:%@", String(describing: info.name)), action: nil, keyEquivalent: "")
             line.isEnabled = false
             sub.addItem(line)
         }
@@ -799,9 +870,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         dockController.setTarget(name, promptForPermission: true)
         if let name = name {
             let alert = NSAlert()
-            alert.messageText = "已把 Dock 固定到「\(name)」"
-            alert.informativeText = "请把鼠标移到该屏幕的底部边缘,Dock 就会迁移过去;之后会一直固定在这块屏,不再乱跑。"
-            alert.addButton(withTitle: "好")
+            alert.messageText = L("已把 Dock 固定到「%@」", String(describing: name))
+            alert.informativeText = L("请把鼠标移到该屏幕的底部边缘,Dock 就会迁移过去;之后会一直固定在这块屏,不再乱跑。")
+            alert.addButton(withTitle: L("好"))
             NSApp.activate(ignoringOtherApps: true)
             alert.runModal()
         }
@@ -813,11 +884,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         brightnessController.refresh()
         brightnessTargets = brightnessController.targets
 
-        let root = NSMenuItem(title: "显示器亮度", action: nil, keyEquivalent: "")
+        let root = NSMenuItem(title: L("显示器亮度"), action: nil, keyEquivalent: "")
         root.image = NSImage(systemSymbolName: "sun.max", accessibilityDescription: nil)
         let sub = NSMenu()
         if brightnessTargets.isEmpty {
-            let none = NSMenuItem(title: "未检测到显示器", action: nil, keyEquivalent: "")
+            let none = NSMenuItem(title: L("未检测到显示器"), action: nil, keyEquivalent: "")
             none.isEnabled = false
             sub.addItem(none)
         }

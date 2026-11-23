@@ -26,7 +26,7 @@ func listDockDisplays() -> [DockDisplay] {
     }
 
     return ids.prefix(Int(count)).map { id in
-        DockDisplay(id: id, name: names[id] ?? "显示器 \(id)",
+        DockDisplay(id: id, name: names[id] ?? L("显示器 %@", String(describing: id)),
                     bounds: CGDisplayBounds(id), isMain: CGDisplayIsMain(id) != 0)
     }
 }

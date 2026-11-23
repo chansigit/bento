@@ -27,10 +27,10 @@ func wifiBars(level: Int) -> String {
 /// instead of making them decode dBm.
 func wifiQualityLabel(level: Int) -> String {
     switch level {
-    case 4: return "极好"
-    case 3: return "良好"
-    case 2: return "一般"
-    default: return "弱"
+    case 4: return L("极好")
+    case 3: return L("良好")
+    case 2: return L("一般")
+    default: return L("弱")
     }
 }
 

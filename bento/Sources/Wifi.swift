@@ -23,9 +23,9 @@ final class WifiController: NSObject {
         isScanning = true
         defer { isScanning = false }
         guard let iface = CWWiFiClient.shared().interface() else {
-            return ([], "未找到 Wi-Fi 网卡")
+            return ([], L("未找到 Wi-Fi 网卡"))
         }
-        guard iface.powerOn() else { return ([], "Wi-Fi 已关闭") }
+        guard iface.powerOn() else { return ([], L("Wi-Fi 已关闭")) }
         let currentSSID = iface.ssid()
         do {
             let found = try iface.scanForNetworks(withSSID: nil)
@@ -37,11 +37,11 @@ final class WifiController: NSObject {
                                         isCurrent: ssid == currentSSID))
             }
             if nets.isEmpty && redacted > 0 {
-                return ([], "需要「定位服务」权限才能显示 Wi-Fi 名称(系统设置 → 隐私与安全 → 定位服务)")
+                return ([], L("需要「定位服务」权限才能显示 Wi-Fi 名称(系统设置 → 隐私与安全 → 定位服务)"))
             }
             return (dedupedSortedNetworks(nets), nil)
         } catch {
-            return ([], "扫描失败:\(error.localizedDescription)")
+            return ([], L("扫描失败:%@", String(describing: error.localizedDescription)))
         }
     }
 }

@@ -17,6 +17,10 @@ struct SwitcherWindowEntry {
     let aspect: CGFloat
 }
 
+func isSwitcherWindow(subrole: String?, modal: Bool) -> Bool {
+    return subrole == kAXStandardWindowSubrole || (subrole == kAXDialogSubrole && !modal)
+}
+
 func readSwitcherWindows() -> [SwitcherWindowEntry] {
     guard hasAccessibilityPermission(prompt: false) else { return [] }
     let defaults = UserDefaults.standard
@@ -30,7 +34,9 @@ func readSwitcherWindows() -> [SwitcherWindowEntry] {
         guard let windows = switcherAttribute(axApp, kAXWindowsAttribute) as? [AXUIElement] else { continue }
         let previousCount = result.count
         for window in windows {
-            guard switcherAttribute(window, kAXSubroleAttribute) as? String == kAXStandardWindowSubrole else { continue }
+            // Finder can expose minimized folder windows as nonmodal AXDialog windows.
+            guard isSwitcherWindow(subrole: switcherAttribute(window, kAXSubroleAttribute) as? String,
+                                   modal: switcherAttribute(window, kAXModalAttribute) as? Bool ?? false) else { continue }
             let minimized = switcherAttribute(window, kAXMinimizedAttribute) as? Bool ?? false
             if minimized && !defaults.bool(forKey: "windowSwitcher.showMinimized") { continue }
             let title = switcherAttribute(window, kAXTitleAttribute) as? String ?? ""
@@ -53,12 +59,12 @@ func readSwitcherWindows() -> [SwitcherWindowEntry] {
             let titled = candidates.filter { ($0.element[kCGWindowName as String] as? String) == title && !title.isEmpty }
             // shortcut: ambiguous public-API matches use an icon; use a window-ID API if Apple exposes one.
             let match = matches.count == 1 ? matches.first : (titled.count == 1 ? titled.first : nil)
-            result.append(SwitcherWindowEntry(app: app, element: window, title: title.isEmpty ? (app.localizedName ?? "窗口") : title,
+            result.append(SwitcherWindowEntry(app: app, element: window, title: title.isEmpty ? (app.localizedName ?? L("窗口")) : title,
                                       id: match?.element[kCGWindowNumber as String] as? UInt32,
                                       rank: match?.offset ?? Int.max, minimized: minimized, aspect: size.height > 0 ? size.width / size.height : 1.5))
         }
         if result.count == previousCount && windows.isEmpty && defaults.bool(forKey: "windowSwitcher.showWindowless") {
-            result.append(SwitcherWindowEntry(app: app, element: nil, title: app.localizedName ?? "应用", id: nil, rank: Int.max, minimized: false, aspect: 1))
+            result.append(SwitcherWindowEntry(app: app, element: nil, title: app.localizedName ?? L("应用程序"), id: nil, rank: Int.max, minimized: false, aspect: 1))
         }
     }
     return result.sorted { $0.rank < $1.rank }

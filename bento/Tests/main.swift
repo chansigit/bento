@@ -1,5 +1,7 @@
 import Foundation
 
+UserDefaults.standard.setVolatileDomain(["languageID": "zh-Hans"], forName: UserDefaults.argumentDomain)
+
 // Minimal assertion harness (old CLT has no usable XCTest for standalone builds)
 var failures = 0
 var passes = 0

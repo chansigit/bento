@@ -1,0 +1,2 @@
+"NSLocationWhenInUseUsageDescription" = "Wi-Fi 이름을 표시하려면 위치 권한이 필요합니다 (시스템 설정 → 개인정보 보호 및 보안 → 위치 서비스).";
+"NSLocationUsageDescription" = "Wi-Fi 이름을 표시하려면 위치 권한이 필요합니다 (시스템 설정 → 개인정보 보호 및 보안 → 위치 서비스).";

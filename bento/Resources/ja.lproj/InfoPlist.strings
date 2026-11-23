@@ -1,0 +1,2 @@
+"NSLocationWhenInUseUsageDescription" = "Wi-Fi 名の表示には位置情報の許可が必要です（システム設定 → プライバシーとセキュリティ → 位置情報サービス）。";
+"NSLocationUsageDescription" = "Wi-Fi 名の表示には位置情報の許可が必要です（システム設定 → プライバシーとセキュリティ → 位置情報サービス）。";

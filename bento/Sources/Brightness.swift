@@ -77,7 +77,7 @@ final class BrightnessController {
             if let svc = svc { t.reading = readBrightness(svc) }
             t.supported = t.reading != nil
             if !t.supported {
-                t.status = externalCount > 1 ? "多显示器尚无法安全匹配 DDC" : "无法读取亮度 · 检查 DDC/CI 与连接线"
+                t.status = externalCount > 1 ? L("多显示器尚无法安全匹配 DDC") : L("无法读取亮度 · 检查 DDC/CI 与连接线")
             }
             return t
         }
@@ -97,31 +97,31 @@ final class BrightnessController {
         switch t.kind {
         case .builtin:
             guard let set = api.dsSet, set(t.id, Float(clampBrightnessPercent(percent)) / 100) == 0 else {
-                t.status = "系统未接受亮度调节"
+                t.status = L("系统未接受亮度调节")
                 return false
             }
             return true
         case .external:
             guard let svc = t.avService, let before = readBrightness(svc) else {
-                t.status = "无法读取亮度 · 检查 DDC/CI 与连接线"
+                t.status = L("无法读取亮度 · 检查 DDC/CI 与连接线")
                 return false
             }
             t.reading = before
             let raw = before.rawValue(percent: percent)
             if raw == before.current { return true }
             guard send(ddcSetVCPPayload(vcp: 0x10, value: raw), to: svc) else {
-                t.status = "亮度指令发送失败 · 检查连接线"
+                t.status = L("亮度指令发送失败 · 检查连接线")
                 return false
             }
             // Give the monitor time to apply the command before verifying it.
             usleep(100_000)
             guard let after = readBrightness(svc) else {
-                t.status = "无法确认调节结果 · 请重新打开菜单"
+                t.status = L("无法确认调节结果 · 请重新打开菜单")
                 return false
             }
             t.reading = after
             guard after.current == raw else {
-                t.status = "屏幕未接受调节 · 请关闭 HDR / B.I.+"
+                t.status = L("屏幕未接受调节 · 请关闭 HDR / B.I.+")
                 return false
             }
             return true

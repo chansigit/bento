@@ -1,9 +1,11 @@
 import Cocoa
 
+UserDefaults.standard.setVolatileDomain(["languageID": "zh-Hans"], forName: UserDefaults.argumentDomain)
+
 // Volatile arguments isolate this check from the user's saved Bento preferences.
 let defaults = UserDefaults.standard
 let originalArguments = defaults.volatileDomain(forName: UserDefaults.argumentDomain)
-defaults.setVolatileDomain(["windowSwitcher.enabled": false, "windowSwitcher.didMigrate": true], forName: UserDefaults.argumentDomain)
+defaults.setVolatileDomain(["languageID": "zh-Hans", "windowSwitcher.enabled": false, "windowSwitcher.didMigrate": true], forName: UserDefaults.argumentDomain)
 let app = NSApplication.shared
 let controller = WindowSwitcherController()
 controller.start()
@@ -55,6 +57,70 @@ let pixelImage = context.makeImage()!
 func testWindow(_ id: CGWindowID) -> SwitcherWindowEntry {
     SwitcherWindowEntry(app: NSRunningApplication.current, element: nil, title: "Test", id: id, rank: 0, minimized: false, aspect: 1)
 }
+assert(isSwitcherWindow(subrole: kAXStandardWindowSubrole, modal: false))
+assert(isSwitcherWindow(subrole: kAXDialogSubrole, modal: false), "Finder folder windows must remain selectable")
+assert(!isSwitcherWindow(subrole: kAXDialogSubrole, modal: true), "Do not independently focus modal sheets")
+assert(!isSwitcherWindow(subrole: kAXFloatingWindowSubrole, modal: false))
+assert(!isSwitcherWindow(subrole: nil, modal: false))
+
+// Mouse selection updates cards in place and yields to subsequent keyboard input.
+let pointer = WindowSwitcherController()
+pointer.enabled = true
+pointer.panel = WindowSwitcherPanel(contentRect: NSRect(x: 10, y: 10, width: 220, height: 120), styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
+func pointerFixture() -> (NSView, WindowSwitcherCard, WindowSwitcherCard) {
+    pointer.entries = [testWindow(100), testWindow(101)]; pointer.cached = pointer.entries
+    pointer.visible = true; pointer.demo = false; pointer.selected = 0
+    pointer.cancelDragHover()
+    let root = WindowSwitcherSurface(frame: NSRect(x: 0, y: 0, width: 220, height: 120))
+    root.owner = pointer
+    let left = WindowSwitcherCard(frame: NSRect(x: 0, y: 0, width: 100, height: 100))
+    let right = WindowSwitcherCard(frame: NSRect(x: 110, y: 0, width: 100, height: 100))
+    left.tag = 0; right.tag = 1; left.selected = true
+    root.addSubview(left); root.addSubview(right); pointer.panel!.contentView = root
+    pointer.pointerLocation = NSPoint(x: -100, y: -100)
+    return (root, left, right)
+}
+let leftPoint = NSPoint(x: 60, y: 60), rightPoint = NSPoint(x: 170, y: 60), gapPoint = NSPoint(x: 115, y: 60)
+let (pointerRoot, leftCard, rightCard) = pointerFixture()
+pointer.pointerMoved(to: rightPoint, dragging: false)
+assert(pointer.selected == 1 && rightCard.selected && !leftCard.selected)
+assert(pointer.panel!.contentView === pointerRoot, "Hover must preserve the native drag destination")
+pointer.selected = 0
+pointer.pointerMoved(to: rightPoint, dragging: false)
+assert(pointer.selected == 0, "A stationary pointer must not override keyboard selection")
+pointer.pointerMoved(to: leftPoint, dragging: true)
+assert(pointer.dragHoverIndex == 0)
+pointer.keyboardSelection()
+assert(pointer.dragHoverIndex == nil, "Keyboard input cancels spring-loading")
+pointer.pointerMoved(to: rightPoint, dragging: true)
+pointer.pointerMoved(to: gapPoint, dragging: true)
+assert(pointer.dragHoverIndex == nil && pointer.selected == 1, "Leaving a card cancels dwell without changing selection")
+pointer.pointerMoved(to: leftPoint, dragging: true)
+pointer.activateDragHover(at: leftPoint, buttonDown: false)
+assert(pointer.visible && pointer.dragHoverIndex == nil, "Releasing the file must never trigger a delayed switch")
+pointer.pointerMoved(to: rightPoint, dragging: true)
+pointer.activateDragHover(at: rightPoint, buttonDown: true)
+assert(!pointer.visible && pointer.dragHoverIndex == nil, "Dwell activates the selected window and clears the timer")
+let (_, _, clickCard) = pointerFixture()
+assert(clickCard.acceptsFirstMouse(for: nil))
+pointer.choose(clickCard)
+assert(!pointer.visible && pointer.selected == 1, "First click activates its card")
+_ = pointerFixture()
+pointer.pointerMoved(to: rightPoint, dragging: false)
+let releaseCommand = CGEvent(source: nil)!
+releaseCommand.flags = []
+assert(!pointer.handle(.flagsChanged, releaseCommand) && !pointer.visible, "Releasing Command commits mouse selection")
+assert(pointer.selected == 1)
+_ = pointerFixture()
+let dragEvent = CGEvent(mouseEventSource: nil, mouseType: .leftMouseDragged, mouseCursorPosition: .zero, mouseButton: .left)!
+assert(!pointer.handle(.leftMouseDragged, dragEvent), "Native drag events must pass through")
+pointer.pointerMoved(to: rightPoint, dragging: true)
+pointer.stop()
+assert(pointer.dragHoverIndex == nil && !pointer.visible)
+pointer.activateDragHover(at: rightPoint, buttonDown: true)
+assert(!pointer.visible, "Late dwell after stop must not reopen the switcher")
+print("Mouse/drag checks passed: hover, last input wins, first click, Command release, dwell, cancellation and drag pass-through")
+
 let first = testWindow(42)
 controller.enabled = true
 controller.cached = [first]

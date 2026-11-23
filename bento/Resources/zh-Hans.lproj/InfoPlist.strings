@@ -1,0 +1,2 @@
+"NSLocationWhenInUseUsageDescription" = "需要「定位服务」权限才能显示 Wi-Fi 名称(系统设置 → 隐私与安全 → 定位服务)";
+"NSLocationUsageDescription" = "需要「定位服务」权限才能显示 Wi-Fi 名称(系统设置 → 隐私与安全 → 定位服务)";

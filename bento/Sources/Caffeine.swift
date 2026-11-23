@@ -25,7 +25,7 @@ final class CaffeineController {
             let ok = IOPMAssertionCreateWithName(
                 kIOPMAssertionTypePreventUserIdleDisplaySleep as CFString,
                 IOPMAssertionLevel(kIOPMAssertionLevelOn),
-                "Bento 防休眠" as CFString,
+                L("Bento 防休眠") as CFString,
                 &assertionID)
             isActive = (ok == kIOReturnSuccess)
         } else {

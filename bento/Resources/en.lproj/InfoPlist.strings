@@ -1,0 +1,2 @@
+"NSLocationWhenInUseUsageDescription" = "Location permission is required for Wi-Fi names (System Settings → Privacy & Security → Location Services).";
+"NSLocationUsageDescription" = "Location permission is required for Wi-Fi names (System Settings → Privacy & Security → Location Services).";
