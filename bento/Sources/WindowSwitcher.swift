@@ -137,6 +137,7 @@ final class WindowSwitcherController: NSObject, ObservableObject {
         refresh()
     }
     func stop() {
+        cancelSwitcherFocus()
         enabled = false
         finish(commit: false)
         generation += 1
@@ -293,6 +294,7 @@ final class WindowSwitcherController: NSObject, ObservableObject {
             let bundle = NSWorkspace.shared.frontmostApplication?.bundleIdentifier ?? ""
             if !visible && switcherExcluded(bundle, rules: UserDefaults.standard.string(forKey: "windowSwitcher.ignoredApps") ?? "") { return false }
             if !visible {
+                cancelSwitcherFocus()
                 recency.readFocus()
                 cached = recency.ordered(cached)
                 entries = cached.filter { !$0.app.isTerminated }

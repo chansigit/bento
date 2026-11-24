@@ -203,3 +203,21 @@ assert(history.ordered([recentA, recentC]).map { $0.title } == ["C", "A"], "Clos
 history.stop()
 assert(history.ordered(stackOrder).map { $0.title } == ["A", "B", "C"], "Stopping clears focus history")
 print("MRU checks passed: focus order, same-app windows, refresh stability, duplicate focus, removal and cleanup")
+
+// Elevated document windows and duplicate geometry must still map to the right preview.
+func candidate(_ id: Int, _ title: String, _ frame: CGRect, _ layer: Int = 0) -> (offset: Int, element: [String: Any]) {
+    (offset: id, element: [kCGWindowNumber as String: id, kCGWindowName as String: title,
+                          kCGWindowBounds as String: frame.dictionaryRepresentation, kCGWindowLayer as String: layer])
+}
+let frameA = CGRect(x: 20, y: 30, width: 400, height: 300)
+let frameB = frameA.offsetBy(dx: 10, dy: 10)
+let elevated = candidate(1, "Note", frameA, 3)
+assert(matchSwitcherWindow([elevated], title: "Note", frame: frameA)?.offset == 1, "always-on-top AX document window can have a thumbnail")
+let other = candidate(2, "Other", frameA)
+assert(matchSwitcherWindow([elevated, other], title: "Note", frame: frameA)?.offset == 1, "title disambiguates equal geometry")
+let sameTitle = candidate(3, "Note", frameB)
+assert(matchSwitcherWindow([elevated, sameTitle], title: "Note", frame: frameA)?.offset == 1, "geometry disambiguates equal titles")
+assert(matchSwitcherWindow([elevated, candidate(4, "Note", frameA)], title: "Note", frame: frameA) == nil, "ambiguous windows never show another document's image")
+assert(matchSwitcherWindow([elevated], title: "", frame: frameA)?.offset == 1, "geometry works when screen permission omits titles")
+assert(matchSwitcherWindow([elevated], title: "", frame: .zero) == nil, "missing bounds and title cannot invent a match")
+print("Window matching checks passed: elevated windows, duplicate titles/bounds and missing metadata")

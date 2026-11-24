@@ -21,6 +21,20 @@ func isSwitcherWindow(subrole: String?, modal: Bool) -> Bool {
     return subrole == kAXStandardWindowSubrole || (subrole == kAXDialogSubrole && !modal)
 }
 
+// Match only windows exposed by Accessibility, including always-on-top document windows.
+func matchSwitcherWindow(_ candidates: [(offset: Int, element: [String: Any])], title: String, frame: CGRect) -> (offset: Int, element: [String: Any])? {
+    let geometry = candidates.filter { _, info in
+        guard let bounds = info[kCGWindowBounds as String] as? NSDictionary,
+              let rect = CGRect(dictionaryRepresentation: bounds) else { return false }
+        return frame.width > 0 && frame.height > 0 && abs(rect.minX - frame.minX) < 2 && abs(rect.minY - frame.minY) < 2 && abs(rect.width - frame.width) < 2 && abs(rect.height - frame.height) < 2
+    }
+    let titled = candidates.filter { !title.isEmpty && ($0.element[kCGWindowName as String] as? String) == title }
+    let both = geometry.filter { !title.isEmpty && ($0.element[kCGWindowName as String] as? String) == title }
+    if both.count == 1 { return both[0] }
+    if geometry.count == 1 { return geometry[0] }
+    return titled.count == 1 ? titled[0] : nil
+}
+
 func readSwitcherWindows() -> [SwitcherWindowEntry] {
     guard hasAccessibilityPermission(prompt: false) else { return [] }
     let defaults = UserDefaults.standard
@@ -31,7 +45,7 @@ func readSwitcherWindows() -> [SwitcherWindowEntry] {
         if app.isHidden && !defaults.bool(forKey: "windowSwitcher.showHidden") { continue }
         let axApp = AXUIElementCreateApplication(app.processIdentifier)
         AXUIElementSetMessagingTimeout(axApp, 0.15)
-        guard let windows = switcherAttribute(axApp, kAXWindowsAttribute) as? [AXUIElement] else { continue }
+        let windows = switcherAttribute(axApp, kAXWindowsAttribute) as? [AXUIElement] ?? []
         let previousCount = result.count
         for window in windows {
             // Finder can expose minimized folder windows as nonmodal AXDialog windows.
@@ -49,16 +63,9 @@ func readSwitcherWindows() -> [SwitcherWindowEntry] {
                 AXValueGetValue(value as! AXValue, .cgSize, &size)
             }
             let candidates = list.enumerated().filter { _, info in
-                (info[kCGWindowOwnerPID as String] as? Int32) == app.processIdentifier && (info[kCGWindowLayer as String] as? Int) == 0
+                (info[kCGWindowOwnerPID as String] as? Int32) == app.processIdentifier
             }
-            let matches = candidates.filter { _, info in
-                guard let bounds = info[kCGWindowBounds as String] as? NSDictionary,
-                      let rect = CGRect(dictionaryRepresentation: bounds) else { return false }
-                return abs(rect.minX - point.x) < 2 && abs(rect.minY - point.y) < 2 && abs(rect.width - size.width) < 2 && abs(rect.height - size.height) < 2
-            }
-            let titled = candidates.filter { ($0.element[kCGWindowName as String] as? String) == title && !title.isEmpty }
-            // shortcut: ambiguous public-API matches use an icon; use a window-ID API if Apple exposes one.
-            let match = matches.count == 1 ? matches.first : (titled.count == 1 ? titled.first : nil)
+            let match = matchSwitcherWindow(candidates, title: title, frame: CGRect(origin: point, size: size))
             result.append(SwitcherWindowEntry(app: app, element: window, title: title.isEmpty ? (app.localizedName ?? L("窗口")) : title,
                                       id: match?.element[kCGWindowNumber as String] as? UInt32,
                                       rank: match?.offset ?? Int.max, minimized: minimized, aspect: size.height > 0 ? size.width / size.height : 1.5))
@@ -70,19 +77,56 @@ func readSwitcherWindows() -> [SwitcherWindowEntry] {
     return result.sorted { $0.rank < $1.rank }
 }
 
+private var switcherFocusRequest = 0
+func cancelSwitcherFocus() { switcherFocusRequest += 1 }
+
 func focusSwitcherWindow(_ entry: SwitcherWindowEntry) {
+    switcherFocusRequest += 1
+    let request = switcherFocusRequest
     guard !entry.app.isTerminated else { NSSound.beep(); return }
-    guard let element = entry.element else {
-        entry.app.unhide(); entry.app.activate(options: [.activateIgnoringOtherApps]); return
-    }
-    if entry.minimized {
-        guard AXUIElementSetAttributeValue(element, kAXMinimizedAttribute as CFString, kCFBooleanFalse) == .success else { NSSound.beep(); return }
-    }
+    let sourcePID = NSWorkspace.shared.frontmostApplication?.processIdentifier
     entry.app.unhide()
-    entry.app.activate(options: [.activateIgnoringOtherApps])
-    DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) {
+    guard let element = entry.element else {
+        // Activation alone cannot reopen an app whose last window was closed.
+        if let url = entry.app.bundleURL {
+            let configuration = NSWorkspace.OpenConfiguration()
+            configuration.activates = true
+            NSWorkspace.shared.openApplication(at: url, configuration: configuration) { _, error in
+                if error != nil { DispatchQueue.main.async { if request == switcherFocusRequest { NSSound.beep() } } }
+            }
+        } else { entry.app.activate(options: [.activateIgnoringOtherApps]) }
+        return
+    }
+    let axApp = AXUIElementCreateApplication(entry.app.processIdentifier)
+    AXUIElementSetMessagingTimeout(axApp, 0.15)
+    AXUIElementSetMessagingTimeout(element, 0.15)
+    func raiseWindow() -> AXError {
+        // The cached minimized flag can be stale by the time the shortcut is released.
+        if switcherAttribute(element, kAXMinimizedAttribute) as? Bool == true {
+            AXUIElementSetAttributeValue(element, kAXMinimizedAttribute as CFString, kCFBooleanFalse)
+        }
         AXUIElementSetAttributeValue(element, kAXMainAttribute as CFString, kCFBooleanTrue)
-        if AXUIElementPerformAction(element, kAXRaiseAction as CFString) != .success { NSSound.beep() }
+        return AXUIElementPerformAction(element, kAXRaiseAction as CFString)
+    }
+    func activateApp() {
+        entry.app.activate(options: [.activateIgnoringOtherApps])
+        AXUIElementSetAttributeValue(axApp, kAXFrontmostAttribute as CFString, kCFBooleanTrue)
+    }
+    _ = raiseWindow()
+    activateApp()
+    // Apps may restore another window during activation or finish unminimizing later.
+    for delay in [0.08, 0.22, 0.5] {
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
+            guard request == switcherFocusRequest, !entry.app.isTerminated else { return }
+            let front = NSWorkspace.shared.frontmostApplication?.processIdentifier
+            guard front == sourcePID || front == entry.app.processIdentifier else { switcherFocusRequest += 1; return }
+            if front == entry.app.processIdentifier,
+               let focused = switcherAttribute(axApp, kAXFocusedWindowAttribute), CFEqual(focused, element) { switcherFocusRequest += 1; return }
+            guard switcherAttribute(element, kAXRoleAttribute) != nil else { return }
+            let raised = raiseWindow()
+            activateApp()
+            if delay == 0.5 && raised != .success { NSSound.beep() }
+        }
     }
 }
 
