@@ -70,6 +70,7 @@ final class SnipPin: NSWindowController, NSWindowDelegate {
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
         super.init(window: panel); panel.delegate = self
         canvas.owner = self
+        canvas.onZoom = { [weak self] factor, _ in self?.zoom(factor) }
         canvas.toolTip = L("拖动移动 · 滚轮缩放 · 下边缘展开编辑")
         canvas.setAccessibilityLabel(L("Bento 悬浮贴图")); panel.contentView = canvas
         canvas.onChange = { [weak self] in self?.updateUndo() }
@@ -166,7 +167,7 @@ final class SnipPin: NSWindowController, NSWindowDelegate {
     }
 
     func zoom(_ factor: CGFloat) {
-        guard let window = window else { return }
+        guard factor.isFinite, factor > 0, let window = window else { return }
         let frame = window.frame
         let minimumScale = max(0.1, 16 / max(baseSize.width, baseSize.height))
         let scale = min(5, max(minimumScale, frame.width * factor / baseSize.width))

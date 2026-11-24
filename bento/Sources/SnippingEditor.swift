@@ -96,6 +96,12 @@ class SnipCanvas: NSView {
         let step = event.scrollingDeltaY * (event.hasPreciseScrollingDeltas ? 0.01 : 0.08)
         onZoom?(exp(min(0.3, max(-0.3, step))), event.locationInWindow)
     }
+    override func magnify(with event: NSEvent) {
+        guard draft == nil, dragOrigin == nil, !event.phase.contains(.cancelled) else { return }
+        let factor = 1 + event.magnification
+        guard factor.isFinite, factor > 0, factor != 1 else { return }
+        onZoom?(factor, event.locationInWindow)
+    }
     func cancelDraft() { draft = nil; mosaicSource = nil; needsDisplay = true }
     override func keyDown(with event: NSEvent) {
         if event.keyCode == 53 { if draft != nil { cancelDraft() } else { onCancel?() }; return }

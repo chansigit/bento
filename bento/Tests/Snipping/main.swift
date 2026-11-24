@@ -225,6 +225,45 @@ let originalFrame = pin.window!.frame
 pin.zoom(1.5)
 check(abs(pin.window!.frame.width / pin.window!.frame.height - 1.6) < 0.001, "pin zoom keeps aspect")
 check(abs(pin.window!.frame.width - originalFrame.width * 1.5) < 0.1, "pin zoom changes size")
+final class PinchEvent: NSEvent {
+    var delta: CGFloat = 0
+    var gesturePhase: NSEvent.Phase = .changed
+    override var type: NSEvent.EventType { .magnify }
+    override var magnification: CGFloat { delta }
+    override var phase: NSEvent.Phase { gesturePhase }
+    override var locationInWindow: NSPoint { .zero }
+}
+let pinch = PinchEvent()
+let beforePinch = pin.window!.frame
+let pixelsBeforePinch = snipPNG(pin.canvas.document.rendered()!)
+pinch.delta = 0.2; pin.canvas.magnify(with: pinch)
+check(abs(pin.window!.frame.width - beforePinch.width * 1.2) < 1, "spreading fingers enlarges the desktop sticker")
+pinch.delta = -0.25; pin.canvas.magnify(with: pinch)
+check(abs(pin.window!.frame.width - beforePinch.width * 0.9) < 1, "pinching fingers shrinks the desktop sticker")
+check(abs(pin.window!.frame.midX - beforePinch.midX) < 1 && abs(pin.window!.frame.midY - beforePinch.midY) < 1, "pinch preserves sticker center")
+pin.toggleEditing()
+pin.canvas.document.append(SnipMark(tool: .rectangle, points: [CGPoint(x:10,y:10),CGPoint(x:40,y:40)], color: .red, width: 3))
+let annotatedBeforePinch = snipPNG(pin.canvas.document.rendered()!)
+pinch.delta = 0.1; pin.canvas.magnify(with: pinch)
+check(snipPNG(pin.canvas.document.rendered()!) == annotatedBeforePinch, "pinch while editing preserves annotation pixels")
+check(pin.controls?.isVisible == true, "editing controls remain visible while pinching")
+let validFrame = pin.window!.frame
+for delta: CGFloat in [.nan, .infinity, -1, -2] {
+    pinch.delta = delta; pin.canvas.magnify(with: pinch)
+    check(pin.window!.frame == validFrame, "invalid pinch cannot corrupt sticker bounds")
+}
+pinch.delta = 0.3; pinch.gesturePhase = .cancelled; pin.canvas.magnify(with: pinch)
+check(pin.window!.frame == validFrame, "cancelled pinch does not resize")
+pinch.gesturePhase = .changed
+pin.canvas.draft = SnipMark(tool: .pen, points: [.zero], color: .red, width: 3)
+pin.canvas.magnify(with: pinch)
+check(pin.window!.frame == validFrame && pin.canvas.draft != nil, "pinch does not disrupt an unfinished annotation")
+pin.canvas.cancelDraft(); pin.canvas.document.undo(); pin.toggleEditing()
+check(snipPNG(pin.canvas.document.rendered()!) == pixelsBeforePinch, "pinch and undo preserve original image resolution and colors")
+pinch.delta = 100; pin.canvas.magnify(with: pinch)
+check(abs(pin.window!.frame.width - originalFrame.width * 5) < 1, "pinch respects maximum zoom")
+pinch.delta = -0.999; pin.canvas.magnify(with: pinch)
+check(abs(pin.window!.frame.width - originalFrame.width * 0.1) < 1, "pinch respects minimum zoom")
 pin.changeOpacity(-10); check(pin.window?.alphaValue == 0.2, "opacity minimum remains recoverable")
 pin.changeOpacity(10); check(pin.window?.alphaValue == 1, "opacity maximum")
 check(pin.window?.level == .floating && pin.window?.hidesOnDeactivate == false, "pin stays over other apps")
